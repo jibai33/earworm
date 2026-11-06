@@ -5,10 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
 <title>闻曲 Earworm · 听曲知雅意</title>
 <meta name="theme-color" content="#0f1216">
-<link rel="manifest" href="/app/manifest.webmanifest">
-<link rel="icon" href="/app/icon.svg" type="image/svg+xml">
-<link rel="apple-touch-icon" href="/app/icon.svg">
-<link rel="stylesheet" href="/app/app.css">
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="icon" href="./icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="./icon.svg">
+<link rel="stylesheet" href="./app.css">
 </head>
 <body>
 <canvas id="ambient" aria-hidden="true"></canvas>
@@ -81,6 +81,7 @@
     <p>登录后听自己的曲库</p>
     <button class="brush-btn" onclick="document.getElementById('login-btn').click()">去登录</button>
   </div>
+  <button id="logout-btn" class="brush-btn danger" onclick="logout()" hidden>退出登录</button>
   <h2 class="sec-title">曲库 <span class="sec-en">MY PLAYLISTS</span></h2>
   <div id="my-playlists" class="pl-list"></div>
 </div>
@@ -142,6 +143,7 @@
       <button id="prev" class="icon-btn big" aria-label="上一首">⏮</button>
       <button id="toggle" class="icon-btn play" aria-label="播放/暂停"><span id="play-icon">▶</span></button>
       <button id="next" class="icon-btn big" aria-label="下一首">⏭</button>
+      <button id="quality-btn" class="icon-btn" aria-label="音质">♪</button>
       <button id="mode-btn" class="icon-btn" aria-label="播放模式"><span id="mode-icon">⇉</span></button>
       <button id="queue-btn" class="icon-btn" aria-label="播放队列">☰</button>
     </div>
@@ -154,6 +156,13 @@
   <div id="queue-list" class="queue-list"></div>
 </div>
 <div id="queue-mask" class="queue-mask" hidden></div>
+
+<!-- ══ 音质菜单 ══ -->
+<div id="quality-menu" class="quality-menu" hidden>
+  <div class="q-head">音质 <button id="quality-close" class="icon-btn">✕</button></div>
+  <div id="q-list"></div>
+</div>
+<div id="q-mask" class="queue-mask" hidden onclick="document.getElementById('quality-menu').hidden=true"></div>
 
 <!-- ══ 扫码登录 ══ -->
 <div id="login-modal" class="login-modal" hidden>
@@ -168,9 +177,9 @@
 </div>
 
 <audio id="audio" preload="metadata"></audio>
-<script src="/app/app.js"></script>
+<script src="./app.js"></script>
 <script>
-if ('serviceWorker' in navigator) navigator.serviceWorker.register('/app/sw.js');
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js');
 </script>
 </body>
 </html>

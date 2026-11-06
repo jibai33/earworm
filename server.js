@@ -172,7 +172,7 @@ const server = http.createServer(async (req, res) => {
       try { const nr = await lyric_new({ id, cookie: userCookie, timestamp: Date.now() }); body = nr.body || {}; } catch { /* 降级 */ }
       const lrcStr = body.lrc ? (body.lrc.lyric || '') : '';
       const tStr = body.tlyric ? (body.tlyric.lyric || '') : '';
-      if (lrcStr) return sendJSON(res, { lyric: lrcStr, tlyric: tStr, source: 'lyric' });
+      if (lrcStr) return sendJSON(res, { lyric: lrcStr, tlyric: tStr, yrc: body.yrc ? (body.yrc.lyric || '') : '', ytlyric: body.ytlrc ? (body.ytlrc.lyric || '') : '', source: 'lyric' });
       try {
         const r = await lyric({ id, cookie: userCookie, timestamp: Date.now() });
         const b = r.body || {};
