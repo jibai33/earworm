@@ -2,9 +2,17 @@
 const $ = (id) => document.getElementById(id);
 const audio = $('audio');
 
-/* API 基地址：本地/自部署为空；GitHub Pages 部署时通过「服务地址」设置指向后端 */
+/* API 基地址：本地/自部署为空；GitHub Pages 部署时默认指向云端服务 */
 const IS_PAGES = location.hostname.endsWith('github.io');
-let API_BASE = localStorage.getItem('ew_api') || '';
+const CLOUD_API = 'https://earworm-music.app.workbuddy.host';
+const CLOUD_SHARECODE = '66G2SQ67OM';
+let API_BASE = localStorage.getItem('ew_api') || (IS_PAGES ? CLOUD_API : '');
+function apiUrl(path) {
+  if (!API_BASE) return path;
+  const sep = path.includes('?') ? '&' : '?';
+  const code = API_BASE === CLOUD_API ? CLOUD_SHARECODE : localStorage.getItem('ew_sharecode') || '';
+  return API_BASE + path + sep + (code ? 'sharecode=' + code : '');
+}
 
 const POEMS = [
   '此曲只应天上有，人间能得几回闻。',
@@ -36,9 +44,9 @@ const state = {
 /* ---------- 工具 ---------- */
 const fmt = (s) => { s = Math.max(0, Math.floor(s || 0)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
 const escapeHtml = (s) => String(s || '').replace(/[<>&"]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c]));
-const coverUrl = (u) => u ? `${API_BASE}/api/cover?url=${encodeURIComponent(u)}` : '';
+const coverUrl = (u) => u ? apiUrl(`/api/cover?url=${encodeURIComponent(u)}`) : '';
 const plural = (n) => n >= 10000 ? (n / 10000).toFixed(1) + ' 万' : n;
-async function api(path, opts) { const r = await fetch(API_BASE + path, opts); return r.json(); }
+async function api(path, opts) { const r = await fetch(apiUrl(path), opts); return r.json(); }
 
 /* ---------- API 地址设置（Pages 模式） ---------- */
 if (IS_PAGES) {
