@@ -323,3 +323,30 @@ body::before {
 }
 .q-item.cur { color: var(--amber); }
 .brush-btn.danger { border-color: rgba(192,57,43,.6); color: #e08578; margin: 14px 0 4px; width: 100%; }
+
+/* ═══ v1.2 多平台 ═══ */
+.src-tabs { display: flex; gap: 8px; padding: 6px 16px 2px; }
+.src-tab {
+  background: none; border: 1px solid var(--line); color: var(--txt-dim);
+  border-radius: 999px; padding: 6px 16px; font-size: 13px; cursor: pointer;
+  font-family: var(--serif); letter-spacing: .1em; transition: all .18s;
+}
+.src-tab.cur { color: var(--amber); border-color: var(--amber); background: rgba(230,176,106,.08); }
+.song .src-tag {
+  font-size: 10px; color: var(--txt-dim); border: 1px solid var(--line);
+  border-radius: 4px; padding: 0 4px; margin-left: 6px; vertical-align: middle;
+}
+.login-tabs { display: flex; gap: 8px; justify-content: center; margin: 10px 0 14px; }
+.login-tab {
+  background: none; border: 1px solid var(--line); color: var(--txt-dim);
+  border-radius: 999px; padding: 6px 18px; font-size: 13px; cursor: pointer;
+  font-family: var(--serif); letter-spacing: .1em;
+}
+.login-tab.cur { color: var(--amber); border-color: var(--amber); }
+.cookie-input {
+  width: 100%; box-sizing: border-box; background: var(--ink-2); color: var(--txt);
+  border: 1px solid var(--line); border-radius: 8px; padding: 10px;
+  font-size: 12px; font-family: monospace; resize: vertical; margin: 10px 0;
+}
+.cookie-row { display: flex; gap: 10px; }
+.cookie-row .brush-btn { margin: 0; flex: 1; }
