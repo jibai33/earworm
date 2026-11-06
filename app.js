@@ -47,7 +47,15 @@ const fmt = (s) => { s = Math.max(0, Math.floor(s || 0)); return `${Math.floor(s
 const escapeHtml = (s) => String(s || '').replace(/[<>&"]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c]));
 const coverUrl = (u) => u ? apiUrl(`/api/cover?url=${encodeURIComponent(u)}`) : '';
 const plural = (n) => n >= 10000 ? (n / 10000).toFixed(1) + ' 万' : n;
-async function api(path, opts) { const r = await fetch(apiUrl(path), opts); return r.json(); }
+async function api(path, opts) {
+  let r;
+  try { r = await fetch(apiUrl(path), opts); }
+  catch (e) {
+    throw new Error('连接不上闻曲服务——请确认通过 http://localhost:3210/app/ 打开（而不是文件或静态预览），且 node server.js 正在运行');
+  }
+  if (!r.ok && r.status >= 500) throw new Error('服务出错（HTTP ' + r.status + '），看服务端日志');
+  return r.json();
+}
 
 /* ---------- API 地址设置（Pages 模式） ---------- */
 if (IS_PAGES) {
