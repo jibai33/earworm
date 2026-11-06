@@ -64,6 +64,7 @@
     <button class="src-tab cur" data-src="netease">云村</button>
     <button class="src-tab" data-src="qishui">汽水</button>
     <button class="src-tab" data-src="qq">QQ</button>
+    <button class="src-tab" data-src="xy">小宇宙</button>
   </div>
   <div id="search-history-wrap" class="hist-wrap">
     <div class="hist-head"><span class="sec-title small">曾闻</span><button id="hist-clear" class="text-btn">清空</button></div>
@@ -177,6 +178,7 @@
       <button class="login-tab cur" data-lp="netease">云村</button>
       <button class="login-tab" data-lp="qishui">汽水</button>
       <button class="login-tab" data-lp="qq">QQ</button>
+      <button class="login-tab" data-lp="xy">小宇宙</button>
     </div>
 
     <!-- 网易云：扫码 -->
@@ -209,6 +211,18 @@
         <button id="qq-cookie-clear" class="brush-btn danger">退出</button>
       </div>
       <div id="qq-cookie-status" class="qr-status">未查询登录态</div>
+    </div>
+
+    <!-- 小宇宙：粘贴 token -->
+    <div id="lp-xy" hidden>
+      <h2>登录 · 小宇宙</h2>
+      <p class="login-tip">电脑浏览器打开 web.xiaoyuzhoufm.com 登录后，F12 → Network 任意 api.xiaoyuzhoufm.com 请求的 x-jike-access-token 请求头，复制粘贴到下面</p>
+      <textarea id="xy-token-input" class="cookie-input" rows="3" placeholder="粘贴 x-jike-access-token……"></textarea>
+      <div class="cookie-row">
+        <button id="xy-token-save" class="brush-btn solid">登录</button>
+        <button id="xy-token-clear" class="brush-btn danger">退出</button>
+      </div>
+      <div id="xy-token-status" class="qr-status">未查询登录态</div>
     </div>
 
     <button id="login-close" class="brush-btn">关闭</button>

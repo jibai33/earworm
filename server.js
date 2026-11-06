@@ -33,6 +33,7 @@ const crypto = require('crypto');
 /* ---------- 多平台模块 ---------- */
 const qishuiApi = require('./modules/qishui-api.js');
 const qqApi = require('./modules/qq-api.js');
+const xyApi = require('./modules/xiaoyuzhou-api.js');
 const { TrackDecryptor } = require('./modules/qishui-audio-decryptor/track-decryptor');
 const qishuiAudioDecryptor = new TrackDecryptor();
 
@@ -49,6 +50,19 @@ function saveQQCookie(c) {
   qqApi.setQQCookie(String(c || '').trim());
   try { fs.writeFileSync(QQ_COOKIE_FILE, qqApi.getQQCookie()); } catch (e) { console.error('[QQCookie] 写入失败', e.message); }
 }
+
+/* 小宇宙 token（JSON: access/refresh/uid/nickname） */
+const XY_TOKEN_FILE = path.join(__dirname, '.xy-token.json');
+let xyTokenData = {};
+try { xyTokenData = JSON.parse(fs.readFileSync(XY_TOKEN_FILE, 'utf8')); } catch { /* 首次无 token */ }
+xyApi.setTokenStore({
+  get: () => xyTokenData,
+  save: (t) => {
+    xyTokenData = t || {};
+    try { fs.writeFileSync(XY_TOKEN_FILE, JSON.stringify(xyTokenData, null, 1)); } catch (e) { console.error('[XYToken] 写入失败', e.message); }
+  },
+  clear: () => { xyTokenData = {}; try { fs.unlinkSync(XY_TOKEN_FILE); } catch { /* 无文件 */ } },
+});
 
 const PORT = Number(process.env.PORT || 3210);
 const HOST = process.env.HOST || '0.0.0.0';
@@ -421,6 +435,23 @@ const server = http.createServer(async (req, res) => {
       return sendJSON(res, await qqApi.handleQQSongUrl(q.get('mid') || q.get('id') || '', q.get('mediaMid') || '', q.get('quality') || ''));
     }
     if (pn === '/api/qq/lyric') return sendJSON(res, await qqApi.handleQQLyric(q.get('mid') || '', q.get('id') || ''));
+
+    // ==================== 小宇宙播客 ====================
+    if (pn === '/api/xy/status') return sendJSON(res, xyApi.handleXYStatus());
+    if (pn === '/api/xy/login/token') {
+      const body = req.method === 'POST' ? await readBody(req) : {};
+      try { return sendJSON(res, await xyApi.handleXYSetToken(body.token || q.get('token') || '')); }
+      catch (e) { return sendJSON(res, { ok: false, error: e.message }, 200); }
+    }
+    if (pn === '/api/xy/logout') return sendJSON(res, await xyApi.handleXYLogout());
+    if (pn === '/api/xy/search') {
+      const kw = q.get('keywords') || '';
+      const offset = Math.max(0, parseInt(q.get('offset') || '0', 10) || 0);
+      return sendJSON(res, await xyApi.handleXYSearch(kw, 20, offset));
+    }
+    if (pn === '/api/xy/podcast') return sendJSON(res, await xyApi.handleXYPodcast(q.get('id') || ''));
+    if (pn === '/api/xy/episode') return sendJSON(res, await xyApi.handleXYEpisode(q.get('id') || ''));
+    if (pn === '/api/xy/subscription') return sendJSON(res, await xyApi.handleXYSubscription(100));
 
     // ==================== 音频代理（汽水解密 + QQ/跨域透传） ====================
     if (pn === '/api/audio') {
