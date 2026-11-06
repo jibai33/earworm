@@ -23,6 +23,7 @@ const {
   personalized_newsong,
   like: like_song,
   likelist,
+  comment_music,
 } = require('NeteaseCloudMusicApi');
 const http = require('http');
 const https = require('https');
@@ -452,6 +453,27 @@ const server = http.createServer(async (req, res) => {
     if (pn === '/api/xy/podcast') return sendJSON(res, await xyApi.handleXYPodcast(q.get('id') || ''));
     if (pn === '/api/xy/episode') return sendJSON(res, await xyApi.handleXYEpisode(q.get('id') || ''));
     if (pn === '/api/xy/subscription') return sendJSON(res, await xyApi.handleXYSubscription(100));
+
+    // ---------- 评论（网易云热评） ----------
+    if (pn === '/api/comment') {
+      const id = q.get('id');
+      const limit = Math.min(30, parseInt(q.get('limit') || '20', 10) || 20);
+      const offset = Math.max(0, parseInt(q.get('offset') || '0', 10) || 0);
+      try {
+        const r = await comment_music({ id, limit, offset, cookie: userCookie, timestamp: Date.now() });
+        const b = r.body || {};
+        const map = (c) => ({
+          id: c.commentId, content: c.content,
+          likedCount: c.likedCount || 0,
+          time: c.time, user: { nickname: (c.user && c.user.nickname) || '云村村民', avatar: (c.user && c.user.avatarUrl) || '' },
+        });
+        return sendJSON(res, {
+          total: b.total || 0,
+          comments: (b.comments || []).map(map),
+          hotComments: (b.hotComments || []).map(map),
+        });
+      } catch (e) { return sendJSON(res, { error: e.message, comments: [], hotComments: [] }, 500); }
+    }
 
     // ==================== 音频代理（汽水解密 + QQ/跨域透传） ====================
     if (pn === '/api/audio') {
