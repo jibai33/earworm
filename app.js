@@ -1,6 +1,10 @@
-/* 闻曲 Earworm — Web 播放器 v2 */
+/* 闻曲 Earworm — Web 播放器 v1.1：逐字卡拉 + 持久化 + 音质 + 快捷键 */
 const $ = (id) => document.getElementById(id);
 const audio = $('audio');
+
+/* API 基地址：本地/自部署为空；GitHub Pages 部署时通过「服务地址」设置指向后端 */
+const IS_PAGES = location.hostname.endsWith('github.io');
+let API_BASE = localStorage.getItem('ew_api') || '';
 
 const POEMS = [
   '此曲只应天上有，人间能得几回闻。',
@@ -11,23 +15,46 @@ const POEMS = [
   '嘈嘈切切错杂弹，大珠小珠落玉盘。',
 ];
 
+const QUALITIES = [
+  { key: 'standard', label: '标准' },
+  { key: 'exhigh', label: '极高' },
+  { key: 'lossless', label: '无损' },
+  { key: 'hires', label: 'Hi-Res' },
+];
+
 const state = {
   queue: [], index: -1, playing: false,
-  lyrics: [], curLyric: -1,
+  lyrics: [], curLyric: -1, karaoke: false,
   qrKey: null, qrTimer: null,
   offset: 0, keyword: '',
-  mode: localStorage.getItem('ew_mode') || 'order', // order | one | shuffle
-  liked: {},           // id -> bool
-  user: null,
-  currentPl: null,     // 歌单详情上下文
+  mode: localStorage.getItem('ew_mode') || 'order',
+  quality: localStorage.getItem('ew_quality') || 'exhigh',
+  liked: {}, user: null,
+  pendingSeek: 0,
 };
 
 /* ---------- 工具 ---------- */
 const fmt = (s) => { s = Math.max(0, Math.floor(s || 0)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
 const escapeHtml = (s) => String(s || '').replace(/[<>&"]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c]));
-const coverUrl = (u) => u ? `/api/cover?url=${encodeURIComponent(u)}` : '';
+const coverUrl = (u) => u ? `${API_BASE}/api/cover?url=${encodeURIComponent(u)}` : '';
 const plural = (n) => n >= 10000 ? (n / 10000).toFixed(1) + ' 万' : n;
-async function api(path) { const r = await fetch(path); return r.json(); }
+async function api(path, opts) { const r = await fetch(API_BASE + path, opts); return r.json(); }
+
+/* ---------- API 地址设置（Pages 模式） ---------- */
+if (IS_PAGES) {
+  document.addEventListener('DOMContentLoaded', () => {
+    const tip = document.createElement('div');
+    tip.className = 'api-tip';
+    tip.innerHTML = API_BASE
+      ? `在线版 · 服务：<code>${escapeHtml(API_BASE)}</code> <button class="text-btn" onclick="setApiBase()">修改</button>`
+      : `在线版需要指定服务地址 <button class="brush-btn" onclick="setApiBase()">设置</button>`;
+    document.body.prepend(tip);
+  });
+}
+function setApiBase() {
+  const v = prompt('填入闻曲服务地址（如 https://your-server.com）', API_BASE);
+  if (v !== null) { localStorage.setItem('ew_api', v.trim()); location.reload(); }
+}
 
 /* ---------- 页面切换 ---------- */
 document.querySelectorAll('#tabbar .tab').forEach(t => t.addEventListener('click', () => {
@@ -75,6 +102,7 @@ async function refreshLoginStatus() {
     if (r.loggedIn) {
       state.user = r;
       $('topbar-user').hidden = false; $('login-btn').hidden = true;
+      $('logout-btn').hidden = false;
       $('user-name').textContent = r.nickname || '';
       if (r.avatar) $('user-avatar').src = r.avatar;
       $('mine-user').hidden = false; $('mine-login-tip').hidden = true;
@@ -85,9 +113,14 @@ async function refreshLoginStatus() {
     } else {
       state.user = null;
       $('topbar-user').hidden = true; $('login-btn').hidden = false;
+      $('logout-btn').hidden = true;
       $('mine-user').hidden = true; $('mine-login-tip').hidden = false;
     }
   } catch { $('login-btn').hidden = false; }
+}
+function logout() {
+  if (!confirm('退出登录并清除本机 cookie？')) return;
+  api('/api/logout').then(refreshLoginStatus);
 }
 
 /* ---------- 发现页 ---------- */
@@ -95,15 +128,14 @@ async function loadDiscover() {
   $('poem-line').textContent = POEMS[Math.floor(Math.random() * POEMS.length)];
   try {
     const d = await api('/api/discover/home');
-    if (d.user && d.user.nickname) { /* 接口已带用户态，刷新 */ }
     const daily = d.dailySongs || [];
     if (daily.length) {
       $('daily-hero').hidden = false; $('daily-rail-section').hidden = false;
       const first = daily[0];
       $('hero-cover').src = coverUrl(first.cover);
       $('hero-name').textContent = first.name;
-      $('hero-artist').textContent = first.artist + ' · ' + (first.album || '');
-      $('hero-play').onclick = () => { state.queue = daily.slice(); state.offset = 0; renderQueue(); playIndex(0); };
+      $('hero-artist').textContent = first.artist + (first.album ? ' · ' + first.album : '');
+      $('hero-play').onclick = () => { state.queue = daily.slice(); renderQueue(); playIndex(0); };
       $('daily-hero').onclick = () => $('hero-play').click();
       const rail = $('daily-rail'); rail.innerHTML = '';
       daily.slice(0, 20).forEach(s => {
@@ -154,10 +186,7 @@ async function openPlaylist(id) {
     $('pl-cover').src = coverUrl(pl.cover);
     $('pl-name').textContent = pl.name || '曲单';
     $('pl-count').textContent = `${pl.trackCount || tracks.length} 首 · ${plural(pl.playCount || 0)} 次听过`;
-    $('pl-playall').onclick = () => {
-      state.queue = tracks.slice(); renderQueue();
-      closePlDetail(); playIndex(0);
-    };
+    $('pl-playall').onclick = () => { state.queue = tracks.slice(); renderQueue(); closePlDetail(); playIndex(0); };
     const box = $('pl-tracks'); box.innerHTML = '';
     tracks.forEach((s, i) => box.appendChild(songEl(s, i, i + 1)));
   } catch (e) {
@@ -217,7 +246,7 @@ function songEl(s, i, idxLabel) {
   el.dataset.i = i;
   el.innerHTML = `
     <div class="song-idx">${idxLabel != null ? idxLabel : ''}</div>
-    <img src="${coverUrl(s.cover) || '/app/icon.svg'}" loading="lazy" alt="">
+    <img src="${coverUrl(s.cover) || 'icon.svg'}" loading="lazy" alt="">
     <div class="meta">
       <div class="name">${escapeHtml(s.name)}</div>
       <div class="artist">${escapeHtml(s.artist)}${s.fee === 1 ? ' · VIP' : ''}</div>
@@ -239,6 +268,7 @@ function renderQueue() {
     if (i === state.index) el.classList.add('playing');
     box.appendChild(el);
   });
+  saveState();
 }
 async function playIndex(i) {
   if (i < 0 || i >= state.queue.length) return;
@@ -251,8 +281,8 @@ async function playIndex(i) {
   $('stage-name').textContent = s.name;
   $('stage-artist').textContent = s.artist;
   const cv = coverUrl(s.cover);
-  $('mini-cover').src = cv || '/app/icon.svg';
-  $('stage-cover').src = cv || '/app/icon.svg';
+  $('mini-cover').src = cv || 'icon.svg';
+  $('stage-cover').src = cv || 'icon.svg';
   $('stage-bg').style.backgroundImage = cv ? `url(${cv})` : 'none';
   $('fee-badge').hidden = s.fee !== 1;
   $('quality-badge').hidden = true;
@@ -260,15 +290,20 @@ async function playIndex(i) {
   refreshLikeState(s.id);
   $('play-icon').textContent = '…'; $('mini-icon').textContent = '…';
   try {
-    const info = await api(`/api/song/url?id=${s.id}`);
+    const info = await api(`/api/song/url?id=${s.id}&quality=${state.quality}`);
     const url = info.url || (info.playback && info.playback.url);
     if (!url) throw new Error(info.error || info.message || '取不到播放地址（VIP 或版权歌曲需登录）');
-    if (info.level || info.br) {
+    if (info.level) {
       $('quality-badge').hidden = false;
-      $('quality-badge').textContent = (info.level || (info.br >= 999000 ? '无损' : info.br >= 320000 ? 'Hi-Res' : '标准'));
+      $('quality-badge').textContent = info.level;
     }
+    const seek = state.pendingSeek; state.pendingSeek = 0;
     audio.src = url;
+    if (seek) audio.addEventListener('loadedmetadata', function once() {
+      audio.currentTime = seek; audio.removeEventListener('loadedmetadata', once);
+    }, { once: true });
     audio.play();
+    saveState();
   } catch (err) {
     $('mini-artist').textContent = '⚠ ' + err.message;
     setPlayingUI(false);
@@ -281,8 +316,8 @@ function setPlayingUI(p) {
   $('stage').classList.toggle('paused', !p);
 }
 function toggle() { if (!audio.src) return; audio.paused ? audio.play() : audio.pause(); }
-audio.addEventListener('play', () => setPlayingUI(true));
-audio.addEventListener('pause', () => setPlayingUI(false));
+audio.addEventListener('play', () => { setPlayingUI(true); saveState(); });
+audio.addEventListener('pause', () => { setPlayingUI(false); saveState(); });
 audio.addEventListener('ended', () => {
   if (state.mode === 'one') { audio.currentTime = 0; audio.play(); return; }
   if (state.mode === 'shuffle' && state.queue.length) return playIndex(Math.floor(Math.random() * state.queue.length));
@@ -294,6 +329,7 @@ audio.addEventListener('timeupdate', () => {
   $('seek').value = d ? Math.round(c / d * 1000) : 0;
   $('mini-progress').firstElementChild.style.width = d ? (c / d * 100) + '%' : '0';
   syncLyric(c);
+  if (Math.floor(c) % 5 === 0) saveState();
 });
 $('seek').addEventListener('input', (e) => { if (audio.duration) audio.currentTime = e.target.value / 1000 * audio.duration; });
 $('toggle').addEventListener('click', toggle);
@@ -301,9 +337,36 @@ $('mini-toggle').addEventListener('click', (e) => { e.stopPropagation(); toggle(
 $('prev').addEventListener('click', () => playIndex(state.index - 1));
 $('next').addEventListener('click', () => playIndex(state.index + 1));
 
-/* 播放模式 */
+/* ---------- 持久化 ---------- */
+function saveState() {
+  try {
+    localStorage.setItem('ew_state', JSON.stringify({
+      queue: state.queue.slice(0, 200), index: state.index,
+      time: audio.currentTime || 0, playing: state.playing,
+    }));
+  } catch { /* 满 */ }
+}
+function restoreState() {
+  try {
+    const s = JSON.parse(localStorage.getItem('ew_state') || 'null');
+    if (!s || !s.queue || !s.queue.length) return;
+    state.queue = s.queue; state.index = s.index ?? 0;
+    state.pendingSeek = s.time || 0;
+    renderQueue();
+    const cur = state.queue[state.index];
+    if (cur) {
+      $('mini').hidden = false;
+      $('mini-name').textContent = cur.name;
+      $('mini-artist').textContent = cur.artist + ' · 继续听';
+      const cv = coverUrl(cur.cover);
+      $('mini-cover').src = cv || 'icon.svg';
+      $('mini-toggle').addEventListener('click', () => playIndex(state.index), { once: true });
+    }
+  } catch { /* ignore */ }
+}
+
+/* ---------- 播放模式 ---------- */
 function applyMode() {
-  audio.loop = false;
   $('mode-icon').textContent = state.mode === 'one' ? '⟳' : state.mode === 'shuffle' ? '⤨' : '⇉';
   localStorage.setItem('ew_mode', state.mode);
 }
@@ -313,15 +376,38 @@ $('mode-btn').addEventListener('click', () => {
 });
 applyMode();
 
+/* ---------- 音质选择 ---------- */
+function renderQualityMenu() {
+  const wrap = $('q-list');
+  wrap.innerHTML = '';
+  QUALITIES.forEach(q => {
+    const b = document.createElement('button');
+    b.className = 'q-item' + (q.key === state.quality ? ' cur' : '');
+    b.textContent = q.label;
+    b.onclick = () => {
+      state.quality = q.key;
+      localStorage.setItem('ew_quality', q.key);
+      renderQualityMenu();
+      $('quality-menu').hidden = true;
+      if (state.index >= 0) playIndex(state.index);
+    };
+    wrap.appendChild(b);
+  });
+}
+$('quality-btn').addEventListener('click', () => {
+  renderQualityMenu();
+  const m = $('quality-menu');
+  m.hidden = !m.hidden;
+});
+$('quality-close').addEventListener('click', () => { $('quality-menu').hidden = true; });
+
 /* ---------- 红心 ---------- */
 async function refreshLikeState(id) {
   if (!state.user || !id) return;
   try {
     const r = await api(`/api/song/like/check?ids=${id}`);
     const ids = r.likedIds || [];
-    const likedObj = r.liked || {};
-    const liked = Array.isArray(ids) ? ids.includes(String(id)) : !!likedObj[id];
-    state.liked[id] = liked;
+    state.liked[id] = Array.isArray(ids) ? ids.includes(String(id)) : !!((r.liked || {})[id]);
     updateHeartUI();
   } catch { /* ignore */ }
 }
@@ -339,7 +425,7 @@ async function toggleLike() {
   if (!state.user) { openLogin(); return; }
   const next = !state.liked[cur.id];
   try {
-    await fetch('/api/song/like', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: cur.id, like: next }) });
+    await api('/api/song/like', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: cur.id, like: next }) });
     state.liked[cur.id] = next;
     updateHeartUI();
   } catch { /* ignore */ }
@@ -391,12 +477,44 @@ function parseLrc(text) {
   });
   return out.sort((a, b) => a.t - b.t);
 }
+/* 逐字格式: [行起,行长](字起,字长,0)字 … */
+function parseYrc(text) {
+  const out = [];
+  String(text || '').split('\n').forEach(line => {
+    const head = line.match(/^\[(\d+),(\d+)\]/);
+    if (!head) return;
+    const words = [];
+    for (const w of line.matchAll(/\((\d+),(\d+),\d+\)([^(]*)/g)) {
+      const tx = w[3];
+      if (tx.trim()) words.push({ start: (+w[1]) / 1000, dur: (+w[2]) / 1000, text: tx });
+    }
+    if (words.length) out.push({ t: (+head[1]) / 1000, dur: (+head[2]) / 1000, words });
+  });
+  return out.sort((a, b) => a.t - b.t);
+}
 async function loadLyrics(id) {
   $('lyrics').innerHTML = '';
-  state.lyrics = []; state.curLyric = -1;
+  state.lyrics = []; state.curLyric = -1; state.karaoke = false;
   try {
     const d = await api(`/api/lyric?id=${id}`);
-    state.lyrics = parseLrc(d.lrc || d.lyric || d.text || '');
+    const yrc = parseYrc(d.yrc);
+    if (yrc.length) {
+      state.lyrics = yrc; state.karaoke = true;
+      yrc.forEach((l, i) => {
+        const el = document.createElement('div');
+        el.className = 'line karaoke'; el.dataset.i = i;
+        l.words.forEach(w => {
+          const sp = document.createElement('span');
+          sp.textContent = w.text;
+          sp.dataset.start = w.start; sp.dataset.end = w.start + w.dur;
+          el.appendChild(sp);
+        });
+        el.addEventListener('click', () => { if (audio.duration) audio.currentTime = l.t; });
+        $('lyrics').appendChild(el);
+      });
+      return;
+    }
+    state.lyrics = parseLrc(d.lyric || d.lrc || '');
     const trans = parseLrc(d.tlyric || d.translation || '');
     if (trans.length) state.lyrics = state.lyrics.map(l => {
       const tr = trans.find(t => Math.abs(t.t - l.t) < 0.5);
@@ -415,12 +533,22 @@ function syncLyric(c) {
   if (!state.lyrics.length) return;
   let idx = -1;
   for (let i = 0; i < state.lyrics.length; i++) { if (state.lyrics[i].t <= c + .2) idx = i; else break; }
-  if (idx === state.curLyric) return;
+  if (idx === state.curLyric) { if (state.karaoke && idx >= 0) paintKaraoke(idx, c); return; }
   state.curLyric = idx;
   const nodes = $('lyrics').children;
   for (const n of nodes) n.classList.toggle('cur', Number(n.dataset.i) === idx);
   const cur = nodes[idx];
   if (cur) $('lyrics').scrollTop = cur.offsetTop - $('lyrics').clientHeight / 2 + cur.offsetHeight;
+  if (state.karaoke && idx >= 0) paintKaraoke(idx, c);
+}
+function paintKaraoke(idx, c) {
+  const el = $('lyrics').children[idx];
+  if (!el) return;
+  for (const sp of el.children) {
+    const s = +sp.dataset.start, e = +sp.dataset.end;
+    sp.classList.toggle('lit', c >= e);
+    sp.classList.toggle('singing', c >= s && c < e);
+  }
 }
 
 /* ---------- 扫码登录 ---------- */
@@ -457,7 +585,20 @@ function pollQr() {
 $('login-btn').addEventListener('click', openLogin);
 $('login-close').addEventListener('click', () => { $('login-modal').hidden = true; clearInterval(state.qrTimer); state.qrKey = null; });
 
+/* ---------- 键盘快捷键 ---------- */
+document.addEventListener('keydown', (e) => {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+  if (e.code === 'Space') { e.preventDefault(); toggle(); }
+  else if (e.code === 'ArrowRight' && e.shiftKey) playIndex(state.index + 1);
+  else if (e.code === 'ArrowLeft' && e.shiftKey) playIndex(state.index - 1);
+  else if (e.code === 'ArrowRight') audio.currentTime = Math.min(audio.duration || 0, audio.currentTime + 5);
+  else if (e.code === 'ArrowLeft') audio.currentTime = Math.max(0, audio.currentTime - 5);
+  else if (e.code === 'ArrowUp') audio.volume = Math.min(1, audio.volume + .1);
+  else if (e.code === 'ArrowDown') audio.volume = Math.max(0, audio.volume - .1);
+});
+
 /* ---------- 启动 ---------- */
 renderHist();
 refreshLoginStatus();
 loadDiscover();
+restoreState();

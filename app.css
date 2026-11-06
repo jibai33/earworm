@@ -296,3 +296,30 @@ body::before {
   .page { max-width: 640px; margin: 0 auto; }
   .pl-grid { grid-template-columns: repeat(3, 1fr); }
 }
+
+/* ═══ v1.1 附加 ═══ */
+.karaoke span { transition: color .18s linear; }
+.karaoke span.lit { color: var(--amber-2); }
+.karaoke span.singing {
+  color: var(--amber-2);
+  text-shadow: 0 0 14px rgba(230,176,106,.65);
+}
+.api-tip {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 70;
+  background: rgba(192,57,43,.92); color: #f5e9d5; font-size: 12px;
+  padding: 8px 14px; text-align: center;
+}
+.api-tip code { background: rgba(255,255,255,.12); border-radius: 4px; padding: 1px 6px; }
+.quality-menu {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 40;
+  background: var(--ink-2); border-top: 1px solid var(--line);
+  border-radius: 22px 22px 0 0; padding: 16px 18px max(14px, env(safe-area-inset-bottom));
+}
+.q-head { display: flex; justify-content: space-between; align-items: center; font-family: var(--serif); letter-spacing: .14em; margin-bottom: 6px; }
+.q-item {
+  display: block; width: 100%; text-align: left; background: none; border: none;
+  color: var(--txt-dim); font-size: 15px; padding: 13px 8px; cursor: pointer;
+  border-bottom: 1px solid var(--line);
+}
+.q-item.cur { color: var(--amber); }
+.brush-btn.danger { border-color: rgba(192,57,43,.6); color: #e08578; margin: 14px 0 4px; width: 100%; }
