@@ -87,22 +87,74 @@ function resizeCanvas() {
 addEventListener('resize', resizeCanvas); resizeCanvas();
 function drawAmbient(t) {
   ctx.clearRect(0, 0, innerWidth, innerHeight);
-  const beat = state.playing ? (Math.sin(t / 900) * .5 + .5) : 0;
+  const beat = state.playing ? (state.level || (Math.sin(t / 900) * .5 + .5)) : 0;
   for (const m of motes) {
     m.x += m.vx; m.y += m.vy;
     if (m.y < -10) { m.y = innerHeight + 10; m.x = Math.random() * innerWidth; }
     if (m.x < -10) m.x = innerWidth + 10;
     if (m.x > innerWidth + 10) m.x = -10;
     const alpha = m.a * (state.playing ? .8 + beat * .9 : .7);
-    const g = ctx.createRadialGradient(m.x, m.y, 0, m.x, m.y, m.r * 4);
+    const rr = m.r * (4 + beat * 3);
+    const g = ctx.createRadialGradient(m.x, m.y, 0, m.x, m.y, rr);
     g.addColorStop(0, `rgba(230,176,106,${alpha})`);
     g.addColorStop(1, 'rgba(230,176,106,0)');
     ctx.fillStyle = g;
-    ctx.beginPath(); ctx.arc(m.x, m.y, m.r * 4, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.arc(m.x, m.y, rr, 0, 7); ctx.fill();
   }
   requestAnimationFrame(drawAmbient);
 }
 requestAnimationFrame(drawAmbient);
+
+/* ---------- 频谱可视化（Web Audio，复刻原版 02-visual/03-beat） ---------- */
+let audioCtx = null, analyser = null, freqData = null;
+function ensureAudioGraph() {
+  if (audioCtx) return;
+  try {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const src = audioCtx.createMediaElementSource(audio);
+    analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 256;
+    analyser.smoothingTimeConstant = .8;
+    freqData = new Uint8Array(analyser.frequencyBinCount);
+    src.connect(analyser);
+    analyser.connect(audioCtx.destination);
+  } catch (e) { console.warn('频谱不可用', e); }
+}
+const spCanvas = $('spectrum');
+const spCtx = spCanvas.getContext('2d');
+let lowAvg = 0;
+function drawSpectrum() {
+  requestAnimationFrame(drawSpectrum);
+  if (!spCanvas.width) resizeSpectrum();
+  spCtx.clearRect(0, 0, spCanvas.width, spCanvas.height);
+  if (!analyser || !state.playing) { state.level = 0; return; }
+  analyser.getByteFrequencyData(freqData);
+  const bars = 48, step = Math.floor(freqData.length / bars);
+  const w = spCanvas.width / bars;
+  let sum = 0;
+  for (let i = 0; i < bars; i++) {
+    let v = 0;
+    for (let k = 0; k < step; k++) v += freqData[i * step + k];
+    v = v / step / 255;
+    sum += v;
+    const h = Math.max(2, v * spCanvas.height * .9);
+    const grad = spCtx.createLinearGradient(0, spCanvas.height, 0, spCanvas.height - h);
+    grad.addColorStop(0, 'rgba(230,176,106,.15)');
+    grad.addColorStop(1, `rgba(230,176,106,${.25 + v * .6})`);
+    spCtx.fillStyle = grad;
+    spCtx.fillRect(i * w + w * .18, spCanvas.height - h, w * .64, h);
+  }
+  lowAvg = lowAvg * .8 + (sum / bars) * .2;
+  state.level = Math.min(1.4, lowAvg * 2.2);
+  document.documentElement.style.setProperty('--beat', state.level.toFixed(3));
+}
+function resizeSpectrum() {
+  if (!spCanvas.offsetParent) return;
+  spCanvas.width = spCanvas.clientWidth * devicePixelRatio;
+  spCanvas.height = spCanvas.clientHeight * devicePixelRatio;
+}
+addEventListener('resize', resizeSpectrum);
+requestAnimationFrame(drawSpectrum);
 
 /* ---------- 登录态 ---------- */
 async function refreshLoginStatus() {
@@ -373,6 +425,8 @@ async function playIndex(i) {
       const info = await api(`/api/song/url?id=${s.id}&quality=${state.quality}`);
       url = info.url || (info.playback && info.playback.url);
       if (!url) throw new Error(info.error || info.message || '取不到播放地址（VIP 或版权歌曲需登录）');
+      // 统一走代理（同源），保证 Web Audio 频谱可用
+      url = apiUrl(`/api/audio?url=${encodeURIComponent(url)}`);
       if (info.level) {
         $('quality-badge').hidden = false;
         $('quality-badge').textContent = info.level;
@@ -380,6 +434,8 @@ async function playIndex(i) {
     }
     const seek = state.pendingSeek; state.pendingSeek = 0;
     audio.src = url;
+    ensureAudioGraph();
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
     if (seek) audio.addEventListener('loadedmetadata', function once() {
       audio.currentTime = seek; audio.removeEventListener('loadedmetadata', once);
     }, { once: true });
@@ -495,7 +551,7 @@ async function refreshLikeState(song) {
 }
 function updateHeartUI() {
   const cur = state.queue[state.index];
-  const on = cur && state.liked[cur.id];
+  const on = cur && (state.liked[cur.id] || isCollected(cur.id));
   $('mini-like').textContent = on ? '♥' : '♡';
   $('mini-like').classList.toggle('on', !!on);
   $('like-btn').textContent = on ? '♥' : '♡';
@@ -504,13 +560,17 @@ function updateHeartUI() {
 async function toggleLike() {
   const cur = state.queue[state.index];
   if (!cur) return;
-  if (!state.user) { openLogin(); return; }
-  const next = !state.liked[cur.id];
-  try {
-    await api('/api/song/like', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: cur.id, like: next }) });
-    state.liked[cur.id] = next;
-    updateHeartUI();
-  } catch { /* ignore */ }
+  // 网易云登录态：红心云端；否则存入本地收藏夹
+  if (cur.provider === 'netease' && state.user) {
+    const next = !state.liked[cur.id];
+    try {
+      await api('/api/song/like', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: cur.id, like: next }) });
+      state.liked[cur.id] = next;
+    } catch { /* ignore */ }
+  } else {
+    toggleCollect(cur);
+  }
+  updateHeartUI();
 }
 $('like-btn').addEventListener('click', toggleLike);
 $('mini-like').addEventListener('click', (e) => { e.stopPropagation(); toggleLike(); });
@@ -758,6 +818,83 @@ function pollQr() {
 $('login-btn').addEventListener('click', openLogin);
 $('login-close').addEventListener('click', () => { $('login-modal').hidden = true; clearInterval(state.qrTimer); state.qrKey = null; });
 
+/* ---------- 倍速 ---------- */
+const RATES = [1, 1.25, 1.5, 2, 0.75];
+let rateIdx = 0;
+$('rate-btn').addEventListener('click', () => {
+  rateIdx = (rateIdx + 1) % RATES.length;
+  audio.playbackRate = RATES[rateIdx];
+  $('rate-icon').textContent = RATES[rateIdx] + '×';
+});
+
+/* ---------- 评论抽屉（复刻原版热评） ---------- */
+function openComments() {
+  $('comment-drawer').hidden = false;
+  $('comment-mask').hidden = false;
+  loadComments();
+}
+function closeComments() { $('comment-drawer').hidden = true; $('comment-mask').hidden = true; }
+$('comment-btn').addEventListener('click', openComments);
+$('comment-close').addEventListener('click', closeComments);
+$('comment-mask').addEventListener('click', closeComments);
+async function loadComments() {
+  const box = $('comment-list');
+  const cur = state.queue[state.index];
+  box.innerHTML = '<div class="c-item"><div class="c-content">正在取评论……</div></div>';
+  if (!cur) { box.innerHTML = '<div class="c-item"><div class="c-content">先放首歌再来</div></div>'; return; }
+  if (cur.provider !== 'netease') { box.innerHTML = `<div class="c-item"><div class="c-content">「${cur.provider === 'xy' ? '小宇宙' : cur.provider === 'qq' ? 'QQ 音乐' : '汽水'}」暂不支持评论区</div></div>`; return; }
+  try {
+    const d = await api(`/api/comment?id=${cur.id}`);
+    const item = (c) => `<div class="c-item"><img class="c-avatar" src="${coverUrl(c.user.avatar) || 'icon.svg'}" loading="lazy"><div class="c-body"><div class="c-head"><span class="c-nick">${escapeHtml(c.user.nickname)}</span><span class="c-likes">♥ ${c.likedCount}</span></div><div class="c-content">${escapeHtml(c.content)}</div></div></div>`;
+    const hot = (d.hotComments || []).map(c => Object.assign({}, c, { likedCount: c.likedCount })).slice(0, 5);
+    const rest = (d.comments || []);
+    box.innerHTML = (hot.length ? '<div class="c-sec">云村热评</div>' + hot.map(item).join('') : '') +
+      (rest.length ? '<div class="c-sec">最新评论</div>' + rest.map(item).join('') : '') ||
+      '<div class="c-item"><div class="c-content">还没有人评论</div></div>';
+  } catch (e) {
+    box.innerHTML = `<div class="c-item"><div class="c-content">评论加载失败：${escapeHtml(e.message)}</div></div>`;
+  }
+}
+
+/* ---------- 本地收藏夹（复刻原版 collect；未登录网易云时红心即收藏） ---------- */
+function getCollects() { try { return JSON.parse(localStorage.getItem('ew_collect') || '[]'); } catch { return []; } }
+function isCollected(id) { return getCollects().some(s => String(s.id) === String(id)); }
+function toggleCollect(song) {
+  let list = getCollects();
+  const exists = list.some(s => String(s.id) === String(song.id));
+  if (exists) list = list.filter(s => String(s.id) !== String(song.id));
+  else {
+    list.unshift({ provider: song.provider, id: song.id, mid: song.mid, mediaMid: song.mediaMid, epid: song.epid, pid: song.pid, isPodcast: song.isPodcast, name: song.name, artist: song.artist, cover: song.cover, fee: song.fee });
+    if (list.length > 200) list.length = 200;
+  }
+  localStorage.setItem('ew_collect', JSON.stringify(list));
+  renderCollects();
+  return !exists;
+}
+function renderCollects() {
+  const list = getCollects();
+  const box = $('collect-list');
+  if (!box) return;
+  $('collect-section').hidden = !list.length;
+  box.innerHTML = '';
+  list.forEach((s) => {
+    const el = document.createElement('div');
+    el.className = 'song';
+    const SRC_LABEL = { qq: 'QQ', qishui: '汽水', xy: '小宇宙' };
+    const tag = s.provider && s.provider !== 'netease' ? `<span class="src-tag">${SRC_LABEL[s.provider] || s.provider}${s.isPodcast ? ' · 播客' : ''}</span>` : '';
+    el.innerHTML = `
+      <div class="song-idx">♥</div>
+      <img src="${coverUrl(s.cover) || 'icon.svg'}" loading="lazy" alt="">
+      <div class="meta">
+        <div class="name">${escapeHtml(s.name)}</div>
+        <div class="artist">${escapeHtml(s.artist)}${s.fee === 1 ? ' · VIP' : ''}${tag}</div>
+      </div>`;
+    el.addEventListener('click', () => { state.queue.push(s); renderQueue(); playIndex(state.queue.length - 1); });
+    el.addEventListener('contextmenu', (e) => { e.preventDefault(); toggleCollect(s); });
+    box.appendChild(el);
+  });
+}
+
 /* ---------- 键盘快捷键 ---------- */
 document.addEventListener('keydown', (e) => {
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
@@ -772,6 +909,7 @@ document.addEventListener('keydown', (e) => {
 
 /* ---------- 启动 ---------- */
 renderHist();
+renderCollects();
 refreshLoginStatus();
 loadDiscover();
 restoreState();

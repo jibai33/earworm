@@ -350,3 +350,25 @@ body::before {
 }
 .cookie-row { display: flex; gap: 10px; }
 .cookie-row .brush-btn { margin: 0; flex: 1; }
+
+/* ═══ v1.4 复刻原版（频谱/评论/倍速/收藏） ═══ */
+#spectrum {
+  position: absolute; left: 0; right: 0; bottom: 132px; height: 64px;
+  width: 100%; pointer-events: none; opacity: .85;
+}
+.sub-btn-row { justify-content: center; gap: 22px; margin-bottom: 4px; }
+.icon-btn.small { font-size: 13px; width: 34px; height: 34px; opacity: .8; }
+.comment-list { overflow-y: auto; flex: 1; padding: 4px 0 20px; }
+.c-sec {
+  font-family: var(--serif); letter-spacing: .14em; font-size: 12px;
+  color: var(--amber); margin: 14px 16px 6px;
+}
+.c-item { display: flex; gap: 10px; padding: 10px 16px; border-bottom: 1px solid var(--line); }
+.c-avatar { width: 32px; height: 32px; border-radius: 50%; flex-shrink: 0; object-fit: cover; }
+.c-body { flex: 1; min-width: 0; }
+.c-head { display: flex; justify-content: space-between; align-items: center; }
+.c-nick { font-size: 12px; color: var(--txt-dim); }
+.c-likes { font-size: 11px; color: var(--txt-dim); }
+.c-content { font-size: 13px; color: var(--txt); line-height: 1.55; margin-top: 4px; word-break: break-word; }
+@keyframes beatPulse { from { transform: scale(1); } to { transform: scale(calc(1 + var(--beat, 0) * .06)); } }
+.cover-ring { animation: beatPulse .12s ease-out infinite alternate; }
