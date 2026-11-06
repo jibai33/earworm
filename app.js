@@ -208,6 +208,26 @@ function closePlDetail() {
 }
 $('pl-back').addEventListener('click', closePlDetail);
 
+/* ---------- 小宇宙播客详情 ---------- */
+async function openXYPodcast(pid) {
+  $('pl-detail').hidden = false;
+  requestAnimationFrame(() => $('pl-detail').classList.add('show'));
+  $('pl-tracks').innerHTML = '<div class="song"><div class="meta"><div class="name">正在取节目……</div></div></div>';
+  try {
+    const d = await api(`/api/xy/podcast?id=${pid}`);
+    const p = d.podcast || {}, episodes = d.episodes || [];
+    state.currentPl = episodes;
+    $('pl-cover').src = coverUrl(p.cover);
+    $('pl-name').textContent = p.name || '播客';
+    $('pl-count').textContent = `小宇宙 · ${episodes.length}${d.total ? ' / ' + d.total : ''} 集 · ${p.artist || ''}`;
+    $('pl-playall').onclick = () => { state.queue = episodes.slice(); renderQueue(); closePlDetail(); playIndex(0); };
+    const box = $('pl-tracks'); box.innerHTML = '';
+    episodes.forEach((s, i) => box.appendChild(songEl(s, i, i + 1)));
+  } catch (e) {
+    $('pl-tracks').innerHTML = `<div class="song"><div class="meta"><div class="name">取节目失败：${escapeHtml(e.message)}</div></div></div>`;
+  }
+}
+
 /* ---------- 搜索 ---------- */
 function getHist() { try { return JSON.parse(localStorage.getItem('ew_hist') || '[]'); } catch { return []; } }
 function pushHist(kw) {
@@ -250,8 +270,16 @@ document.addEventListener('DOMContentLoaded', () => {
 async function doSearch(kw, append) {
   if (!append) { state.offset = 0; $('results').innerHTML = '<div class="song"><div class="meta"><div class="name">正在寻曲……</div></div></div>'; }
   try {
-    const ep = state.provider === 'qq' ? '/api/qq/search' : state.provider === 'qishui' ? '/api/qishui/search' : '/api/search';
+    const ep = state.provider === 'qq' ? '/api/qq/search'
+      : state.provider === 'qishui' ? '/api/qishui/search'
+      : state.provider === 'xy' ? '/api/xy/search'
+      : '/api/search';
     const data = await api(`${ep}?keywords=${encodeURIComponent(kw)}&limit=20&offset=${state.offset}`);
+    if (data.error === 'NEED_LOGIN') {
+      $('results').innerHTML = `<div class="song"><div class="meta"><div class="name">需要登录 ${state.provider === 'xy' ? '小宇宙' : ''}</div><div class="artist">${escapeHtml(data.message || '请先登录该平台')}</div></div></div>`;
+      $('more-btn-wrap').hidden = true;
+      return;
+    }
     const songs = data.songs || [];
     if (!append) { state.queue = []; $('results').innerHTML = ''; }
     const start = state.queue.length;
@@ -271,14 +299,20 @@ function songEl(s, i, idxLabel) {
   const el = document.createElement('div');
   el.className = 'song';
   el.dataset.i = i;
+  const SRC_LABEL = { qq: 'QQ', qishui: '汽水', xy: '小宇宙' };
+  const tag = s.provider && s.provider !== 'netease'
+    ? `<span class="src-tag">${SRC_LABEL[s.provider] || s.provider}${s.isPodcast ? ' · 播客' : ''}</span>` : '';
   el.innerHTML = `
     <div class="song-idx">${idxLabel != null ? idxLabel : ''}</div>
     <img src="${coverUrl(s.cover) || 'icon.svg'}" loading="lazy" alt="">
     <div class="meta">
       <div class="name">${escapeHtml(s.name)}</div>
-      <div class="artist">${escapeHtml(s.artist)}${s.fee === 1 ? ' · VIP' : ''}${s.provider && s.provider !== 'netease' ? `<span class="src-tag">${s.provider === 'qq' ? 'QQ' : '汽水'}</span>` : ''}</div>
+      <div class="artist">${escapeHtml(s.artist)}${s.fee === 1 ? ' · VIP' : ''}${tag}</div>
     </div>`;
-  el.addEventListener('click', () => playIndex(i));
+  el.addEventListener('click', () => {
+    if (s.provider === 'xy' && s.isPodcast) openXYPodcast(s.pid || s.id);
+    else playIndex(i);
+  });
   return el;
 }
 function markPlaying() {
@@ -329,6 +363,12 @@ async function playIndex(i) {
       if (!info.url) throw new Error(info.message || info.error || '取不到汽水播放地址（需登录汽水）');
       url = apiUrl(`/api/audio?url=${encodeURIComponent(info.url)}`);
       if (info.level || info.qualityLabel) { $('quality-badge').hidden = false; $('quality-badge').textContent = info.level || info.qualityLabel; }
+    } else if (s.provider === 'xy') {
+      const e = await api(`/api/xy/episode?id=${encodeURIComponent(s.epid || s.id)}`);
+      const ep = e.episode || {};
+      if (!e.enclosure || !e.enclosure.url) throw new Error('取不到单集音频');
+      url = apiUrl(`/api/audio?url=${encodeURIComponent(e.enclosure.url)}`);
+      s._shownotes = ep.shownotes || '';
     } else {
       const info = await api(`/api/song/url?id=${s.id}&quality=${state.quality}`);
       url = info.url || (info.playback && info.playback.url);
@@ -542,6 +582,23 @@ async function loadLyrics(song) {
     let d;
     if (s.provider === 'qq') d = await api(`/api/qq/lyric?mid=${encodeURIComponent(s.mid || s.id)}&id=${s.songId || ''}`);
     else if (s.provider === 'qishui') d = await api(`/api/qishui/lyric?id=${encodeURIComponent(s.id)}`);
+    else if (s.provider === 'xy') {
+      // 播客无歌词，展示 shownotes 文本
+      let notes = s._shownotes || '';
+      if (!notes) {
+        try { const e = await api(`/api/xy/episode?id=${encodeURIComponent(s.epid || s.id)}`); notes = (e.episode && e.episode.shownotes) || ''; } catch { /* ignore */ }
+      }
+      const text = notes.replace(/<br\s*\/?>/gi, '\n').replace(/<\/(p|div|li|h\d)>/gi, '\n').replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').trim();
+      const lines = text.split('\n').map(x => x.trim()).filter(Boolean).slice(0, 80);
+      lines.forEach((t, i) => {
+        const el = document.createElement('div');
+        el.className = 'line'; el.dataset.i = i;
+        el.textContent = t;
+        $('lyrics').appendChild(el);
+      });
+      if (!lines.length) { const el = document.createElement('div'); el.className = 'line'; el.textContent = '（本单集无 shownotes）'; $('lyrics').appendChild(el); }
+      return;
+    }
     else d = await api(`/api/lyric?id=${s.id}`);
     const yrc = parseYrc(d.yrc);
     if (yrc.length) {
@@ -600,10 +657,11 @@ function paintKaraoke(idx, c) {
 /* ---------- 登录弹窗（三平台） ---------- */
 function switchLoginTab(lp) {
   $('login-tabs').querySelectorAll('.login-tab').forEach(b => b.classList.toggle('cur', b.dataset.lp === lp));
-  ['netease', 'qishui', 'qq'].forEach(p => { $('lp-' + p).hidden = p !== lp; });
+  ['netease', 'qishui', 'qq', 'xy'].forEach(p => { $('lp-' + p).hidden = p !== lp; });
   if (lp === 'netease') startQrLogin();
   if (lp === 'qishui') checkQishuiStatus();
   if (lp === 'qq') checkQQStatus();
+  if (lp === 'xy') checkXYStatus();
 }
 async function startQrLogin() {
   $('qr-status').textContent = '正在生成二维码…';
@@ -659,6 +717,26 @@ $('qq-cookie-save').addEventListener('click', async () => {
   } catch (e) { st.textContent = '⚠ ' + e.message; }
 });
 $('qq-cookie-clear').addEventListener('click', () => api('/api/qq/logout').then(() => { $('qq-cookie-status').textContent = '已退出'; }));
+async function checkXYStatus() {
+  const st = $('xy-token-status');
+  st.textContent = '查询登录态……';
+  try {
+    const r = await api('/api/xy/status');
+    st.textContent = r.loggedIn ? '✓ 已登录' + (r.nickname ? '：' + r.nickname : '') : '未登录，粘贴 token 后点「登录」';
+  } catch (e) { st.textContent = '⚠ ' + e.message; }
+}
+$('xy-token-save').addEventListener('click', async () => {
+  const st = $('xy-token-status');
+  const t = $('xy-token-input').value.trim();
+  if (!t) { st.textContent = '⚠ 请先粘贴 token'; return; }
+  st.textContent = '验证中……';
+  try {
+    const r = await api('/api/xy/login/token', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: t }) });
+    if (r.ok) { st.textContent = '✓ 登录成功，可以搜索和听播客了'; }
+    else st.textContent = '⚠ ' + (r.error || 'token 无效');
+  } catch (e) { st.textContent = '⚠ ' + e.message; }
+});
+$('xy-token-clear').addEventListener('click', () => api('/api/xy/logout').then(() => { $('xy-token-status').textContent = '已退出'; }));
 function pollQr() {
   clearInterval(state.qrTimer);
   state.qrTimer = setInterval(async () => {
