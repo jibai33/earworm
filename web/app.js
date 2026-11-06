@@ -39,6 +39,7 @@ const state = {
   quality: localStorage.getItem('ew_quality') || 'exhigh',
   liked: {}, user: null,
   pendingSeek: 0,
+  provider: localStorage.getItem('ew_provider') || 'netease',
 };
 
 /* ---------- 工具 ---------- */
@@ -229,10 +230,28 @@ $('hist-clear').addEventListener('click', () => { localStorage.removeItem('ew_hi
 $('search-input').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') { e.preventDefault(); const kw = e.target.value.trim(); if (kw) { pushHist(kw); doSearch(kw); } }
 });
+/* ---------- 搜索平台切换 ---------- */
+document.addEventListener('DOMContentLoaded', () => {
+  $('src-tabs').querySelectorAll('.src-tab').forEach(btn => {
+    if (btn.dataset.src === state.provider) {
+      btn.parentElement.querySelectorAll('.src-tab').forEach(b => b.classList.remove('cur'));
+      btn.classList.add('cur');
+    }
+    btn.addEventListener('click', () => {
+      state.provider = btn.dataset.src;
+      localStorage.setItem('ew_provider', state.provider);
+      btn.parentElement.querySelectorAll('.src-tab').forEach(b => b.classList.toggle('cur', b === btn));
+      const kw = $('search-input').value.trim();
+      if (kw) doSearch(kw);
+    });
+  });
+});
+
 async function doSearch(kw, append) {
   if (!append) { state.offset = 0; $('results').innerHTML = '<div class="song"><div class="meta"><div class="name">正在寻曲……</div></div></div>'; }
   try {
-    const data = await api(`/api/search?keywords=${encodeURIComponent(kw)}&limit=20&offset=${state.offset}`);
+    const ep = state.provider === 'qq' ? '/api/qq/search' : state.provider === 'qishui' ? '/api/qishui/search' : '/api/search';
+    const data = await api(`${ep}?keywords=${encodeURIComponent(kw)}&limit=20&offset=${state.offset}`);
     const songs = data.songs || [];
     if (!append) { state.queue = []; $('results').innerHTML = ''; }
     const start = state.queue.length;
@@ -257,7 +276,7 @@ function songEl(s, i, idxLabel) {
     <img src="${coverUrl(s.cover) || 'icon.svg'}" loading="lazy" alt="">
     <div class="meta">
       <div class="name">${escapeHtml(s.name)}</div>
-      <div class="artist">${escapeHtml(s.artist)}${s.fee === 1 ? ' · VIP' : ''}</div>
+      <div class="artist">${escapeHtml(s.artist)}${s.fee === 1 ? ' · VIP' : ''}${s.provider && s.provider !== 'netease' ? `<span class="src-tag">${s.provider === 'qq' ? 'QQ' : '汽水'}</span>` : ''}</div>
     </div>`;
   el.addEventListener('click', () => playIndex(i));
   return el;
@@ -294,16 +313,30 @@ async function playIndex(i) {
   $('stage-bg').style.backgroundImage = cv ? `url(${cv})` : 'none';
   $('fee-badge').hidden = s.fee !== 1;
   $('quality-badge').hidden = true;
-  loadLyrics(s.id);
-  refreshLikeState(s.id);
+  loadLyrics(s);
+  refreshLikeState(s);
   $('play-icon').textContent = '…'; $('mini-icon').textContent = '…';
   try {
-    const info = await api(`/api/song/url?id=${s.id}&quality=${state.quality}`);
-    const url = info.url || (info.playback && info.playback.url);
-    if (!url) throw new Error(info.error || info.message || '取不到播放地址（VIP 或版权歌曲需登录）');
-    if (info.level) {
-      $('quality-badge').hidden = false;
-      $('quality-badge').textContent = info.level;
+    let url = '';
+    if (s.provider === 'qq') {
+      const info = await api(`/api/qq/song/url?mid=${encodeURIComponent(s.mid || s.id)}&mediaMid=${encodeURIComponent(s.mediaMid || '')}&quality=${state.quality === 'lossless' ? 'lossless' : 'standard'}`);
+      if (!info.url) throw new Error(info.error || info.message || '取不到 QQ 播放地址（VIP 歌曲需登录）');
+      // QQ 源多为 http，https 页面下需走代理
+      url = apiUrl(`/api/audio?url=${encodeURIComponent(info.url)}`);
+      if (info.level) { $('quality-badge').hidden = false; $('quality-badge').textContent = info.level; }
+    } else if (s.provider === 'qishui') {
+      const info = await api(`/api/qishui/song/url?id=${encodeURIComponent(s.id)}&quality=${state.quality}`);
+      if (!info.url) throw new Error(info.message || info.error || '取不到汽水播放地址（需登录汽水）');
+      url = apiUrl(`/api/audio?url=${encodeURIComponent(info.url)}`);
+      if (info.level || info.qualityLabel) { $('quality-badge').hidden = false; $('quality-badge').textContent = info.level || info.qualityLabel; }
+    } else {
+      const info = await api(`/api/song/url?id=${s.id}&quality=${state.quality}`);
+      url = info.url || (info.playback && info.playback.url);
+      if (!url) throw new Error(info.error || info.message || '取不到播放地址（VIP 或版权歌曲需登录）');
+      if (info.level) {
+        $('quality-badge').hidden = false;
+        $('quality-badge').textContent = info.level;
+      }
     }
     const seek = state.pendingSeek; state.pendingSeek = 0;
     audio.src = url;
@@ -409,9 +442,10 @@ $('quality-btn').addEventListener('click', () => {
 });
 $('quality-close').addEventListener('click', () => { $('quality-menu').hidden = true; });
 
-/* ---------- 红心 ---------- */
-async function refreshLikeState(id) {
-  if (!state.user || !id) return;
+/* ---------- 红心（仅网易云） ---------- */
+async function refreshLikeState(song) {
+  const s = typeof song === 'object' ? song : { id: song };
+  if (!state.user || !s.id || (s.provider && s.provider !== 'netease')) return;
   try {
     const r = await api(`/api/song/like/check?ids=${id}`);
     const ids = r.likedIds || [];
@@ -500,11 +534,15 @@ function parseYrc(text) {
   });
   return out.sort((a, b) => a.t - b.t);
 }
-async function loadLyrics(id) {
+async function loadLyrics(song) {
+  const s = typeof song === 'object' ? song : { id: song };
   $('lyrics').innerHTML = '';
   state.lyrics = []; state.curLyric = -1; state.karaoke = false;
   try {
-    const d = await api(`/api/lyric?id=${id}`);
+    let d;
+    if (s.provider === 'qq') d = await api(`/api/qq/lyric?mid=${encodeURIComponent(s.mid || s.id)}&id=${s.songId || ''}`);
+    else if (s.provider === 'qishui') d = await api(`/api/qishui/lyric?id=${encodeURIComponent(s.id)}`);
+    else d = await api(`/api/lyric?id=${s.id}`);
     const yrc = parseYrc(d.yrc);
     if (yrc.length) {
       state.lyrics = yrc; state.karaoke = true;
@@ -559,9 +597,15 @@ function paintKaraoke(idx, c) {
   }
 }
 
-/* ---------- 扫码登录 ---------- */
-async function openLogin() {
-  $('login-modal').hidden = false;
+/* ---------- 登录弹窗（三平台） ---------- */
+function switchLoginTab(lp) {
+  $('login-tabs').querySelectorAll('.login-tab').forEach(b => b.classList.toggle('cur', b.dataset.lp === lp));
+  ['netease', 'qishui', 'qq'].forEach(p => { $('lp-' + p).hidden = p !== lp; });
+  if (lp === 'netease') startQrLogin();
+  if (lp === 'qishui') checkQishuiStatus();
+  if (lp === 'qq') checkQQStatus();
+}
+async function startQrLogin() {
   $('qr-status').textContent = '正在生成二维码…';
   try {
     const k = await api('/api/login/qr/key');
@@ -572,6 +616,49 @@ async function openLogin() {
     pollQr();
   } catch (err) { $('qr-status').textContent = '⚠ ' + err.message; }
 }
+async function openLogin() {
+  $('login-modal').hidden = false;
+  switchLoginTab('netease');
+}
+async function checkQishuiStatus() {
+  const st = $('qishui-cookie-status');
+  st.textContent = '查询登录态……';
+  try {
+    const r = await api('/api/qishui/status');
+    st.textContent = r.loggedIn ? `✓ 已登录：${r.nickname || r.userId}（${r.vipLabel || r.vipLevel || ''}）` : '未登录，粘贴 cookie 后点「登录」';
+  } catch (e) { st.textContent = '⚠ ' + e.message; }
+}
+async function checkQQStatus() {
+  const st = $('qq-cookie-status');
+  st.textContent = '查询登录态……';
+  try {
+    const r = await api('/api/qq/status');
+    st.textContent = r.loggedIn ? `✓ 已登录：${r.nickname || r.uin}` : '未登录，粘贴 cookie 后点「登录」（VIP 歌曲需登录）';
+  } catch (e) { st.textContent = '⚠ ' + e.message; }
+}
+$('login-tabs').querySelectorAll('.login-tab').forEach(b => b.addEventListener('click', () => switchLoginTab(b.dataset.lp)));
+$('qishui-cookie-save').addEventListener('click', async () => {
+  const st = $('qishui-cookie-status');
+  const c = $('qishui-cookie-input').value.trim();
+  if (!c) { st.textContent = '⚠ 请先粘贴 cookie'; return; }
+  st.textContent = '保存中……';
+  try {
+    const r = await api('/api/qishui/login/cookie', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ cookie: c }) });
+    st.textContent = r.loggedIn ? '✓ 登录成功' : '⚠ cookie 无效或不含登录态';
+  } catch (e) { st.textContent = '⚠ ' + e.message; }
+});
+$('qishui-cookie-clear').addEventListener('click', () => api('/api/qishui/logout').then(() => { $('qishui-cookie-status').textContent = '已退出'; }));
+$('qq-cookie-save').addEventListener('click', async () => {
+  const st = $('qq-cookie-status');
+  const c = $('qq-cookie-input').value.trim();
+  if (!c) { st.textContent = '⚠ 请先粘贴 cookie'; return; }
+  st.textContent = '保存中……';
+  try {
+    const r = await api('/api/qq/login/cookie', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ cookie: c }) });
+    st.textContent = r.loggedIn ? `✓ 登录成功：${r.nickname || r.uin}` : '⚠ cookie 无效或不含 uin/qm_keyst';
+  } catch (e) { st.textContent = '⚠ ' + e.message; }
+});
+$('qq-cookie-clear').addEventListener('click', () => api('/api/qq/logout').then(() => { $('qq-cookie-status').textContent = '已退出'; }));
 function pollQr() {
   clearInterval(state.qrTimer);
   state.qrTimer = setInterval(async () => {

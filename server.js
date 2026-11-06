@@ -28,6 +28,27 @@ const http = require('http');
 const https = require('https');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
+
+/* ---------- 多平台模块 ---------- */
+const qishuiApi = require('./modules/qishui-api.js');
+const qqApi = require('./modules/qq-api.js');
+const { TrackDecryptor } = require('./modules/qishui-audio-decryptor/track-decryptor');
+const qishuiAudioDecryptor = new TrackDecryptor();
+
+const QISHUI_COOKIE_FILE = path.join(__dirname, '.qishui-cookie');
+const QQ_COOKIE_FILE = path.join(__dirname, '.qq-cookie');
+let qishuiCookie = '';
+try { qishuiCookie = fs.readFileSync(QISHUI_COOKIE_FILE, 'utf8').trim(); } catch { /* 首次无 cookie */ }
+try { qqApi.setQQCookie(fs.readFileSync(QQ_COOKIE_FILE, 'utf8').trim()); } catch { /* 首次无 cookie */ }
+function saveQishuiCookie(c) {
+  qishuiCookie = String(c || '').trim();
+  try { fs.writeFileSync(QISHUI_COOKIE_FILE, qishuiCookie); } catch (e) { console.error('[QishuiCookie] 写入失败', e.message); }
+}
+function saveQQCookie(c) {
+  qqApi.setQQCookie(String(c || '').trim());
+  try { fs.writeFileSync(QQ_COOKIE_FILE, qqApi.getQQCookie()); } catch (e) { console.error('[QQCookie] 写入失败', e.message); }
+}
 
 const PORT = Number(process.env.PORT || 3210);
 const HOST = process.env.HOST || '0.0.0.0';
@@ -115,6 +136,82 @@ function proxyCover(res, coverUrl) {
     up.pipe(res);
   });
   req.on('error', () => { res.writeHead(404); res.end(); });
+}
+
+/* ---------- 音频代理 ---------- */
+const QISHUI_AUDIO_CACHE_MAX_BYTES = 96 * 1024 * 1024;
+const qishuiAudioCache = new Map();
+let qishuiAudioCacheBytes = 0;
+function qishuiAudioAuthFromUrl(audioUrl) {
+  const idx = String(audioUrl).indexOf('#auth=');
+  if (idx < 0) return null;
+  const authRaw = audioUrl.slice(idx + 6);
+  let auth = authRaw;
+  try { auth = decodeURIComponent(authRaw); } catch { /* 原样 */ }
+  return { cleanUrl: audioUrl.slice(0, idx), auth };
+}
+function getQishuiDecryptedAudio(cleanUrl, auth) {
+  const key = crypto.createHash('sha1').update(cleanUrl + '\n' + auth).digest('hex');
+  const cached = qishuiAudioCache.get(key);
+  if (cached) { cached.at = Date.now(); return Promise.resolve(cached); }
+  return fetch(cleanUrl).then(async (up) => {
+    if (!up.ok) throw new Error('汽水加密音频拉取失败: HTTP ' + up.status);
+    const encryptedBuffer = Buffer.from(await up.arrayBuffer());
+    const result = qishuiAudioDecryptor.decrypt({ encryptedBuffer, spadeA: auth });
+    const payload = {
+      buffer: result.buffer,
+      contentType: result.extension === '.flac' ? 'audio/flac' : 'audio/mp4',
+      at: Date.now(),
+    };
+    qishuiAudioCache.set(key, payload);
+    qishuiAudioCacheBytes += payload.buffer.length;
+    while (qishuiAudioCacheBytes > QISHUI_AUDIO_CACHE_MAX_BYTES && qishuiAudioCache.size > 1) {
+      const oldest = [...qishuiAudioCache.entries()].sort((a, b) => (a[1].at || 0) - (b[1].at || 0))[0];
+      if (!oldest) break;
+      qishuiAudioCache.delete(oldest[0]);
+      qishuiAudioCacheBytes -= oldest[1].buffer.length;
+    }
+    return payload;
+  });
+}
+function sendAudioBuffer(res, buffer, contentType, range) {
+  const total = buffer.length;
+  const m = /^bytes=(\d*)-(\d*)$/i.exec(String(range || ''));
+  if (m) {
+    let start = m[1] ? Number(m[1]) : 0;
+    let end = m[2] ? Number(m[2]) : total - 1;
+    if (!Number.isFinite(start) || start < 0) start = 0;
+    if (!Number.isFinite(end) || end >= total) end = total - 1;
+    if (start > end || start >= total) { res.writeHead(416, { 'Content-Range': 'bytes */' + total }); return res.end(); }
+    res.writeHead(206, { 'Content-Type': contentType, 'Access-Control-Allow-Origin': '*', 'Accept-Ranges': 'bytes', 'Content-Length': end - start + 1, 'Content-Range': `bytes ${start}-${end}/${total}` });
+    return res.end(buffer.subarray(start, end + 1));
+  }
+  res.writeHead(200, { 'Content-Type': contentType, 'Access-Control-Allow-Origin': '*', 'Accept-Ranges': 'bytes', 'Content-Length': total });
+  res.end(buffer);
+}
+function audioRefererFor(au) {
+  try {
+    const host = new URL(au).host;
+    if (host.includes('qq.com') || host.includes('qpic.cn')) return 'https://y.qq.com/';
+    if (host.includes('qishui.com') || host.includes('byteimg.com') || host.includes('douyin')) return 'https://www.qishui.com/';
+    if (host.includes('music.163.com') || host.includes('163.com')) return 'https://music.163.com/';
+  } catch { /* ignore */ }
+  return '';
+}
+function proxyAudio(res, au, range) {
+  const headers = { 'User-Agent': UA };
+  const ref = audioRefererFor(au);
+  if (ref) headers.Referer = ref;
+  if (range) headers.Range = range;
+  const mod = au.startsWith('https') ? https : http;
+  const req2 = mod.get(au, { headers }, (up) => {
+    const wh = { 'Content-Type': up.headers['content-type'] || 'audio/mp4', 'Access-Control-Allow-Origin': '*', 'Accept-Ranges': 'bytes' };
+    if (up.headers['content-range']) wh['Content-Range'] = up.headers['content-range'];
+    if (up.headers['content-length']) wh['Content-Length'] = up.headers['content-length'];
+    res.writeHead(up.statusCode, wh);
+    up.pipe(res);
+  });
+  req2.on('error', () => { res.writeHead(502); res.end(); });
 }
 
 /* ---------- 请求体 ---------- */
@@ -274,6 +371,75 @@ const server = http.createServer(async (req, res) => {
         }));
       } catch { /* 空 */ }
       return sendJSON(res, { loggedIn: info.loggedIn, user: info.loggedIn ? { userId: info.userId, nickname: info.nickname, avatar: info.avatar } : null, dailySongs: daily, playlists: pls });
+    }
+
+    // ==================== 汽水音乐 ====================
+    if (pn === '/api/qishui/status') return sendJSON(res, await qishuiApi.handleQishuiStatus(qishuiCookie));
+    if (pn === '/api/qishui/login/cookie') {
+      const body = req.method === 'POST' ? await readBody(req) : {};
+      const c = body.cookie || q.get('cookie') || '';
+      if (!c) return sendJSON(res, { ok: false, error: 'missing cookie' }, 400);
+      saveQishuiCookie(qishuiApi.normalizeQishuiCookieInput(c) || c);
+      return sendJSON(res, await qishuiApi.handleQishuiStatus(qishuiCookie));
+    }
+    if (pn === '/api/qishui/logout') { saveQishuiCookie(''); return sendJSON(res, { ok: true }); }
+    if (pn === '/api/qishui/search') {
+      const kw = q.get('keywords') || '';
+      const limit = Math.min(50, parseInt(q.get('limit') || '20', 10) || 20);
+      const offset = Math.max(0, parseInt(q.get('offset') || '0', 10) || 0);
+      return sendJSON(res, await qishuiApi.handleQishuiSearch(kw, limit, qishuiCookie, offset));
+    }
+    if (pn === '/api/qishui/song/url') {
+      return sendJSON(res, await qishuiApi.handleQishuiSongUrl({
+        id: q.get('id') || q.get('trackId') || '',
+        quality: q.get('quality') || '',
+        vipRequired: q.get('vipRequired') || '',
+        needVip: q.get('needVip') || '',
+        onlyVipPlayable: q.get('onlyVipPlayable') || '',
+        fee: q.get('fee') || '',
+      }, qishuiCookie));
+    }
+    if (pn === '/api/qishui/lyric') return sendJSON(res, await qishuiApi.handleQishuiLyric(q.get('id') || '', qishuiCookie));
+
+    // ==================== QQ 音乐 ====================
+    if (pn === '/api/qq/status') return sendJSON(res, Object.assign({ provider: 'qq' }, qqApi.qqLoginInfo()));
+    if (pn === '/api/qq/login/cookie') {
+      const body = req.method === 'POST' ? await readBody(req) : {};
+      const c = body.cookie || q.get('cookie') || '';
+      if (!c) return sendJSON(res, { ok: false, error: 'missing cookie' }, 400);
+      saveQQCookie(c);
+      return sendJSON(res, Object.assign({ provider: 'qq', ok: true }, qqApi.qqLoginInfo()));
+    }
+    if (pn === '/api/qq/logout') { saveQQCookie(''); return sendJSON(res, { ok: true }); }
+    if (pn === '/api/qq/search') {
+      const kw = q.get('keywords') || '';
+      const limit = Math.min(50, parseInt(q.get('limit') || '20', 10) || 20);
+      const offset = Math.max(0, parseInt(q.get('offset') || '0', 10) || 0);
+      return sendJSON(res, await qqApi.handleQQSearch(kw, limit, offset));
+    }
+    if (pn === '/api/qq/song/url') {
+      return sendJSON(res, await qqApi.handleQQSongUrl(q.get('mid') || q.get('id') || '', q.get('mediaMid') || '', q.get('quality') || ''));
+    }
+    if (pn === '/api/qq/lyric') return sendJSON(res, await qqApi.handleQQLyric(q.get('mid') || '', q.get('id') || ''));
+
+    // ==================== 音频代理（汽水解密 + QQ/跨域透传） ====================
+    if (pn === '/api/audio') {
+      const au = q.get('url') || '';
+      if (!/^https?:\/\//i.test(au)) { res.writeHead(400); return res.end(); }
+      const range = req.headers.range || '';
+      // 汽水加密音频：#auth= → 解密后按 Range 发送
+      const parsed = au.indexOf('#auth=') >= 0 ? qishuiAudioAuthFromUrl(au) : null;
+      if (parsed && parsed.auth) {
+        try {
+          const payload = await getQishuiDecryptedAudio(parsed.cleanUrl, parsed.auth);
+          return sendAudioBuffer(res, payload.buffer, payload.contentType, range);
+        } catch (e) {
+          console.error('[AudioDecrypt]', e.message);
+          return sendJSON(res, { error: e.message }, 502);
+        }
+      }
+      // 通用透传（QQ m4a、网易云外链等）
+      return proxyAudio(res, au, range);
     }
 
     // ---------- 静态资源 ----------

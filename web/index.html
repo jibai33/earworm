@@ -60,6 +60,11 @@
     <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
     <input id="search-input" type="search" placeholder="搜一首歌、一位歌手……" autocomplete="off">
   </div>
+  <div class="src-tabs" id="src-tabs">
+    <button class="src-tab cur" data-src="netease">云村</button>
+    <button class="src-tab" data-src="qishui">汽水</button>
+    <button class="src-tab" data-src="qq">QQ</button>
+  </div>
   <div id="search-history-wrap" class="hist-wrap">
     <div class="hist-head"><span class="sec-title small">曾闻</span><button id="hist-clear" class="text-btn">清空</button></div>
     <div id="search-history" class="chips"></div>
@@ -164,14 +169,48 @@
 </div>
 <div id="q-mask" class="queue-mask" hidden onclick="document.getElementById('quality-menu').hidden=true"></div>
 
-<!-- ══ 扫码登录 ══ -->
+<!-- ══ 登录弹窗（三平台） ══ -->
 <div id="login-modal" class="login-modal" hidden>
   <div class="login-card">
     <span class="seal seal-sm">闻曲</span>
-    <h2>扫码登录 · 网易云</h2>
-    <p class="login-tip">用网易云音乐 App 扫一扫</p>
-    <div class="qr-wrap"><img id="qr-img" alt="登录二维码"></div>
-    <div id="qr-status" class="qr-status">正在生成二维码…</div>
+    <div class="login-tabs" id="login-tabs">
+      <button class="login-tab cur" data-lp="netease">云村</button>
+      <button class="login-tab" data-lp="qishui">汽水</button>
+      <button class="login-tab" data-lp="qq">QQ</button>
+    </div>
+
+    <!-- 网易云：扫码 -->
+    <div id="lp-netease">
+      <h2>扫码登录 · 网易云</h2>
+      <p class="login-tip">用网易云音乐 App 扫一扫</p>
+      <div class="qr-wrap"><img id="qr-img" alt="登录二维码"></div>
+      <div id="qr-status" class="qr-status">正在生成二维码…</div>
+    </div>
+
+    <!-- 汽水：粘贴 cookie -->
+    <div id="lp-qishui" hidden>
+      <h2>登录 · 汽水音乐</h2>
+      <p class="login-tip">在电脑浏览器打开 qishui.com 并登录，F12 → Application → Cookies，复制整段 cookie 粘贴到下面</p>
+      <textarea id="qishui-cookie-input" class="cookie-input" rows="4" placeholder="粘贴汽水 cookie……"></textarea>
+      <div class="cookie-row">
+        <button id="qishui-cookie-save" class="brush-btn solid">登录</button>
+        <button id="qishui-cookie-clear" class="brush-btn danger">退出</button>
+      </div>
+      <div id="qishui-cookie-status" class="qr-status">未查询登录态</div>
+    </div>
+
+    <!-- QQ：粘贴 cookie -->
+    <div id="lp-qq" hidden>
+      <h2>登录 · QQ 音乐</h2>
+      <p class="login-tip">在电脑浏览器打开 y.qq.com 并登录，F12 → Network 任意请求的 Cookie 头，整段复制粘贴</p>
+      <textarea id="qq-cookie-input" class="cookie-input" rows="4" placeholder="粘贴 QQ 音乐 cookie（含 uin 与 qm_keyst）……"></textarea>
+      <div class="cookie-row">
+        <button id="qq-cookie-save" class="brush-btn solid">登录</button>
+        <button id="qq-cookie-clear" class="brush-btn danger">退出</button>
+      </div>
+      <div id="qq-cookie-status" class="qr-status">未查询登录态</div>
+    </div>
+
     <button id="login-close" class="brush-btn">关闭</button>
   </div>
 </div>
