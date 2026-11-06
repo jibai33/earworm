@@ -1,0 +1,19 @@
+{
+  "name": "earworm",
+  "productName": "闻曲 Earworm",
+  "version": "1.0.0",
+  "description": "闻曲 Earworm —— 国风沉浸式音乐播放器（Web/PWA），听曲知雅意",
+  "author": "jibai33",
+  "license": "GPL-3.0-only",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "NeteaseCloudMusicApi": "^4.32.0"
+  },
+  "overrides": {
+    "axios": "1.18.1",
+    "body-parser": "1.20.6"
+  }
+}

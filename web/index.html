@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>闻曲 Earworm · 听曲知雅意</title>
+<meta name="theme-color" content="#0f1216">
+<link rel="manifest" href="/app/manifest.webmanifest">
+<link rel="icon" href="/app/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/app/icon.svg">
+<link rel="stylesheet" href="/app/app.css">
+</head>
+<body>
+<canvas id="ambient" aria-hidden="true"></canvas>
+
+<!-- ══ 发现页 ══ -->
+<div id="page-discover" class="page">
+  <header class="topbar">
+    <div class="brand-mark">
+      <span class="seal">闻曲</span>
+      <span class="brand-sub">EARWORM · 听曲知雅意</span>
+    </div>
+    <div class="topbar-user" id="topbar-user" hidden>
+      <img id="user-avatar" alt="">
+      <span id="user-name"></span>
+    </div>
+    <button id="login-btn" class="brush-btn" hidden>登录</button>
+  </header>
+
+  <div class="poem" id="poem-line">此曲只应天上有，人间能得几回闻。</div>
+
+  <!-- 每日推荐主卡 -->
+  <section id="daily-hero" class="hero" hidden>
+    <img id="hero-cover" alt="">
+    <div class="hero-mask"></div>
+    <div class="hero-info">
+      <div class="hero-tag">今日推荐</div>
+      <div class="hero-name" id="hero-name"></div>
+      <div class="hero-artist" id="hero-artist"></div>
+    </div>
+    <button class="hero-play" id="hero-play" aria-label="播放今日推荐">▶</button>
+  </section>
+
+  <!-- 每日推荐横滑 -->
+  <section class="rail-section" id="daily-rail-section" hidden>
+    <h2 class="sec-title">日日新 <span class="sec-en">DAILY</span></h2>
+    <div class="rail" id="daily-rail"></div>
+  </section>
+
+  <!-- 推荐歌单 -->
+  <section class="grid-section" id="pl-grid-section" hidden>
+    <h2 class="sec-title">拾遗 <span class="sec-en">PLAYLISTS</span></h2>
+    <div class="pl-grid" id="pl-grid"></div>
+  </section>
+</div>
+
+<!-- ══ 搜索页 ══ -->
+<div id="page-search" class="page" hidden>
+  <div class="searchbar">
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+    <input id="search-input" type="search" placeholder="搜一首歌、一位歌手……" autocomplete="off">
+  </div>
+  <div id="search-history-wrap" class="hist-wrap">
+    <div class="hist-head"><span class="sec-title small">曾闻</span><button id="hist-clear" class="text-btn">清空</button></div>
+    <div id="search-history" class="chips"></div>
+  </div>
+  <div id="results" class="results"></div>
+  <div id="more-btn-wrap" hidden><button id="more-btn" class="brush-btn">再听一页</button></div>
+</div>
+
+<!-- ══ 我的页 ══ -->
+<div id="page-mine" class="page" hidden>
+  <div id="mine-user" class="mine-card" hidden>
+    <img id="mine-avatar" alt="">
+    <div class="mine-meta">
+      <div class="mine-name" id="mine-name"></div>
+      <div class="mine-vip" id="mine-vip"></div>
+    </div>
+  </div>
+  <div id="mine-login-tip" class="mine-card login-tip-card" hidden>
+    <p>登录后听自己的曲库</p>
+    <button class="brush-btn" onclick="document.getElementById('login-btn').click()">去登录</button>
+  </div>
+  <h2 class="sec-title">曲库 <span class="sec-en">MY PLAYLISTS</span></h2>
+  <div id="my-playlists" class="pl-list"></div>
+</div>
+
+<!-- ══ 歌单详情页 ══ -->
+<div id="pl-detail" class="pl-detail" hidden>
+  <button id="pl-back" class="icon-btn pl-back" aria-label="返回">←</button>
+  <div class="pl-head">
+    <img id="pl-cover" alt="">
+    <div class="pl-head-meta">
+      <div class="pl-name" id="pl-name"></div>
+      <div class="pl-count" id="pl-count"></div>
+    </div>
+    <button id="pl-playall" class="brush-btn solid">全部播放</button>
+  </div>
+  <div id="pl-tracks" class="results"></div>
+</div>
+
+<!-- ══ 底部导航 ══ -->
+<nav class="tabbar" id="tabbar">
+  <button class="tab cur" data-page="page-discover"><span class="tab-cn">发现</span></button>
+  <button class="tab" data-page="page-search"><span class="tab-cn">搜曲</span></button>
+  <button class="tab" data-page="page-mine"><span class="tab-cn">曲库</span></button>
+</nav>
+
+<!-- ══ 迷你播放条 ══ -->
+<div id="mini" class="mini" hidden>
+  <img id="mini-cover" alt="">
+  <div class="mini-meta">
+    <div id="mini-name" class="mini-name"></div>
+    <div id="mini-artist" class="mini-artist"></div>
+  </div>
+  <button id="mini-like" class="icon-btn heart" aria-label="喜欢">♡</button>
+  <button id="mini-toggle" class="icon-btn" aria-label="播放/暂停"><span id="mini-icon">▶</span></button>
+  <button id="mini-expand" class="icon-btn" aria-label="展开">⌃</button>
+  <div id="mini-progress" class="mini-progress"><i></i></div>
+</div>
+
+<!-- ══ 沉浸播放页 ══ -->
+<div id="stage" class="stage" hidden>
+  <div class="stage-bg" id="stage-bg"></div>
+  <div class="stage-side" aria-hidden="true">余音绕梁 · 三日不绝</div>
+  <button id="stage-close" class="icon-btn stage-close" aria-label="收起">⌄</button>
+  <div class="stage-head">
+    <div id="stage-name" class="stage-name"></div>
+    <div id="stage-artist" class="stage-artist"></div>
+    <div class="stage-badges"><span id="quality-badge" class="badge" hidden></span><span id="fee-badge" class="badge" hidden>VIP</span></div>
+  </div>
+  <div class="cover-wrap"><div class="cover-ring"></div><img id="stage-cover" alt=""></div>
+  <div id="lyrics" class="lyrics"></div>
+  <div class="controls">
+    <div class="progress-row">
+      <span id="t-cur">0:00</span>
+      <input id="seek" type="range" min="0" max="1000" value="0">
+      <span id="t-dur">0:00</span>
+    </div>
+    <div class="btn-row">
+      <button id="like-btn" class="icon-btn heart big-heart" aria-label="喜欢">♡</button>
+      <button id="prev" class="icon-btn big" aria-label="上一首">⏮</button>
+      <button id="toggle" class="icon-btn play" aria-label="播放/暂停"><span id="play-icon">▶</span></button>
+      <button id="next" class="icon-btn big" aria-label="下一首">⏭</button>
+      <button id="mode-btn" class="icon-btn" aria-label="播放模式"><span id="mode-icon">⇉</span></button>
+      <button id="queue-btn" class="icon-btn" aria-label="播放队列">☰</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ 队列抽屉 ══ -->
+<div id="queue-drawer" class="queue-drawer" hidden>
+  <div class="queue-head"><span class="sec-title small">曲目 <span class="sec-en">QUEUE</span></span><button id="queue-close" class="icon-btn">✕</button></div>
+  <div id="queue-list" class="queue-list"></div>
+</div>
+<div id="queue-mask" class="queue-mask" hidden></div>
+
+<!-- ══ 扫码登录 ══ -->
+<div id="login-modal" class="login-modal" hidden>
+  <div class="login-card">
+    <span class="seal seal-sm">闻曲</span>
+    <h2>扫码登录 · 网易云</h2>
+    <p class="login-tip">用网易云音乐 App 扫一扫</p>
+    <div class="qr-wrap"><img id="qr-img" alt="登录二维码"></div>
+    <div id="qr-status" class="qr-status">正在生成二维码…</div>
+    <button id="login-close" class="brush-btn">关闭</button>
+  </div>
+</div>
+
+<audio id="audio" preload="metadata"></audio>
+<script src="/app/app.js"></script>
+<script>
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('/app/sw.js');
+</script>
+</body>
+</html>
