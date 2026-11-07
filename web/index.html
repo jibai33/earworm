@@ -305,16 +305,23 @@
       <div id="qq-cookie-status" class="qr-status">未查询登录态</div>
     </div>
 
-    <!-- 小宇宙：粘贴 token -->
+    <!-- 小宇宙：官网扫码 + token -->
     <div id="lp-xy" hidden>
       <h2>登录 · 小宇宙</h2>
-      <p class="login-tip">电脑浏览器打开 web.xiaoyuzhoufm.com 登录后，F12 → Network 任意 api.xiaoyuzhoufm.com 请求的 x-jike-access-token 请求头，复制粘贴到下面</p>
-      <textarea id="xy-token-input" class="cookie-input" rows="3" placeholder="粘贴 x-jike-access-token……"></textarea>
+      <p class="login-tip">二维码由小宇宙官网生成，先在官网用 App 扫码，再把凭据交给闻曲</p>
+      <ol class="xy-steps">
+        <li><span>壹</span><div><b>打开官网并登录</b><em>www.xiaoyuzhoufm.com</em></div></li>
+        <li><span>贰</span><div><b>用小宇宙 App 扫码</b><em>扫页面二维码，在手机上确认</em></div></li>
+        <li><span>叁</span><div><b>复制请求头</b><em>F12 → Network → 任一 api 请求</em><em>复制 <code>x-jike-access-token</code> 的值</em></div></li>
+      </ol>
+      <button id="xy-open-official" class="brush-btn xy-open">打开官方扫码页 ↗</button>
+      <textarea id="xy-token-input" class="cookie-input" rows="3" placeholder="粘贴 token……（可整段复制请求头）"></textarea>
       <div class="cookie-row">
         <button id="xy-token-save" class="brush-btn solid">登录</button>
         <button id="xy-token-clear" class="brush-btn danger">退出</button>
       </div>
       <div id="xy-token-status" class="qr-status">未查询登录态</div>
+      <p class="xy-note">token 有时效，过期后照上面三步重新取一次即可</p>
     </div>
 
     <button id="login-close" class="brush-btn">关闭</button>

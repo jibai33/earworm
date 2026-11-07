@@ -1,7 +1,7 @@
 // ====================================================================
 //  小宇宙播客客户端（闻曲 Earworm）
-//  - 登录: 手机号 + 短信验证码（/v1/auth/sendCode + loginOrSignUpWithSMS）
-//    → x-jike-access-token / x-jike-refresh-token
+//  - 登录: 官网 www.xiaoyuzhoufm.com 用小宇宙 App 扫码后，取 x-jike-access-token
+//    （App 的短信登录 sendCode 已被强制人机验证 captchaVerifyParam 拦住，不可直连）
 //  - 搜索: /v1/search（播客 + 单集）
 //  - 订阅: /v1/subscription（登录用户播客列表）
 //  - 单集: /v1/podcast/get（播客详情+单集列表）、/v1/episode/get（单集详情+音频）
@@ -58,31 +58,47 @@ function xyPost(path, body, extraHeaders) {
   });
 }
 
-/* ---------- 登录（token 粘贴） ---------- */
-// 小宇宙 App API 已加人机验证，短信直连登录不可行；
-// 用户从小宇宙 Web 端（web.xiaoyuzhoufm.com）或抓包获取 x-jike-access-token 粘贴
+/* ---------- 登录（官网扫码后取得 token） ---------- */
+// 官网二维码与登录态绑在官方域名，web 版无法自行生成；用户在官网用 App 扫码登录后
+// 从 Network 里复制 x-jike-access-token。mac 端可改用 WebView 拦截请求头自动完成。
+const XY_LOGIN_HINT = '小宇宙登录已失效，请在「我的 → 登录」用 App 扫码官网后重新复制 x-jike-access-token';
+const XY_OFFICIAL_URL = 'https://www.xiaoyuzhoufm.com/';
+
+// 容错：整段请求头 / curl 片段 / JSON / 引号包裹 / 换行，都能抽出 token
 function normalizeXyToken(input) {
-  const s = String(input || '').trim();
-  const m = s.match(/([A-Za-z0-9\-_]{2,}\.[A-Za-z0-9\-_]{2,}\.[A-Za-z0-9\-_]{2,})/); // JWT 形态
-  if (m) return m[1];
-  return s || '';
+  let s = String(input || '').trim();
+  const header = s.match(/x-jike-access-token\s*[:=]\s*["']?([A-Za-z0-9._-]+)/i);
+  if (header) s = header[1];
+  else {
+    const jwt = s.match(/eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/);
+    if (jwt) s = jwt[0];
+  }
+  return s.replace(/^["'`\s,;]+|["'`\s,;]+$/g, '').replace(/\s+/g, '');
 }
 async function handleXYSetToken(input) {
   const t = normalizeXyToken(input);
-  if (!t || /[^A-Za-z0-9\-_.]/.test(t)) throw new Error('token 格式不像 x-jike-access-token');
+  if (!t || /[^A-Za-z0-9\-_.]/.test(t)) {
+    throw new Error('没识别出 token，请粘贴 x-jike-access-token 的值（整段请求头也可以）');
+  }
   setXyToken({ access: t, refresh: '', uid: '', nickname: '', avatar: '', at: Date.now() });
   // 用订阅接口验证 token 有效性
-  const r = await xyPost('/v1/subscription', { loadMoreKey: { limit: 5 } });
+  let r;
+  try { r = await xyPost('/v1/subscription', { loadMoreKey: { limit: 5 } }); }
+  catch (e) { tokenStore.clear(); throw new Error('验证失败：' + e.message); }
   if (r.status === 401 || r.body.code === 401) {
     tokenStore.clear();
-    throw new Error('token 无效或已过期');
+    throw new Error('token 无效或已过期，请在官网重新扫码并复制新的 x-jike-access-token');
   }
-  return { ok: true };
+  return { ok: true, loggedIn: true, officialUrl: XY_OFFICIAL_URL, hint: 'token 有时效，过期后照引导重新取一次即可' };
 }
 async function handleXYLogout() { tokenStore.clear(); return { ok: true }; }
 function handleXYStatus() {
   const t = xyToken();
-  return { provider: 'xy', loggedIn: !!t.access, nickname: t.nickname || '', avatar: t.avatar || '', uid: t.uid || '' };
+  return {
+    provider: 'xy', loggedIn: !!t.access,
+    nickname: t.nickname || '', avatar: t.avatar || '', uid: t.uid || '',
+    at: t.at || 0, officialUrl: XY_OFFICIAL_URL, hint: XY_LOGIN_HINT,
+  };
 }
 
 /* ---------- 映射 ---------- */
@@ -124,7 +140,7 @@ function mapXYEpisode(e) {
 async function handleXYSearch(keyword, limit, offset) {
   const loadMoreKey = offset > 0 ? { nextOffset: offset } : { limit: 20 };
   const r = await xyPost('/v1/search', { type: 'ALL', keyword: String(keyword || ''), loadMoreKey });
-  if (r.status === 401 || r.body.code === 401) return { provider: 'xy', error: 'NEED_LOGIN', message: '小宇宙搜索需要登录（登录面板粘贴 token）', songs: [], hasMore: false };
+  if (r.status === 401 || r.body.code === 401) return { provider: 'xy', error: 'NEED_LOGIN', message: XY_LOGIN_HINT, songs: [], hasMore: false };
   const d = r.body.data || {};
   const podcasts = (d.podcasts || []).map(mapXYPodcast);
   const episodes = (d.episodes || []).map(mapXYEpisode);
@@ -136,7 +152,7 @@ async function handleXYSearch(keyword, limit, offset) {
 /* ---------- 播客详情 + 单集列表 ---------- */
 async function handleXYPodcast(pid, loadMoreKey) {
   const r = await xyPost('/v1/podcast/get', { pid, loadMoreKey: loadMoreKey || undefined });
-  if (r.status === 401 || r.body.code === 401) return { provider: 'xy', error: 'NEED_LOGIN', message: '需要登录小宇宙', episodes: [] };
+  if (r.status === 401 || r.body.code === 401) return { provider: 'xy', error: 'NEED_LOGIN', message: XY_LOGIN_HINT, episodes: [] };
   const d = r.body.data || {};
   return {
     provider: 'xy', podcast: mapXYPodcast(d),
@@ -149,7 +165,7 @@ async function handleXYPodcast(pid, loadMoreKey) {
 /* ---------- 单集详情（含音频地址） ---------- */
 async function handleXYEpisode(eid) {
   const r = await xyPost('/v1/episode/get', { eid });
-  if (r.status === 401 || r.body.code === 401) return { provider: 'xy', error: 'NEED_LOGIN', message: '需要登录小宇宙', episode: {}, enclosure: null };
+  if (r.status === 401 || r.body.code === 401) return { provider: 'xy', error: 'NEED_LOGIN', message: XY_LOGIN_HINT, episode: {}, enclosure: null };
   const d = r.body.data || {};
   return { provider: 'xy', episode: mapXYEpisode(d), enclosure: d.enclosure || null };
 }
@@ -159,25 +175,12 @@ async function handleXYSubscription(limit) {
   if (!xyLoggedIn()) return { provider: 'xy', loggedIn: false, podcasts: [] };
   const r = await xyPost('/v1/subscription', { loadMoreKey: { limit: limit || 100 } });
   if (r.status === 401 || r.body.code === 401) {
-    // token 过期 → 尝试刷新一次
-    const ok = await refreshXyToken();
-    if (!ok) return { provider: 'xy', loggedIn: false, podcasts: [], expired: true };
-    const r2 = await xyPost('/v1/subscription', { loadMoreKey: { limit: limit || 100 } });
-    const d2 = r2.body.data || {};
-    return { provider: 'xy', loggedIn: true, podcasts: (d2.subscriptions || []).map(mapXYPodcast) };
+    // /v1/auth/refreshToken 实测 404（另试四种常见路径也全 404），自动续期不可行。
+    //  因此这里直接给可读的过期提示，由前端引导用户重新取 token。
+    return { provider: 'xy', loggedIn: false, podcasts: [], expired: true, message: XY_LOGIN_HINT };
   }
   const d = r.body.data || {};
   return { provider: 'xy', loggedIn: true, podcasts: (d.subscriptions || []).map(mapXYPodcast) };
-}
-async function refreshXyToken() {
-  const t = xyToken();
-  if (!t.refresh) return false;
-  try {
-    const r = await xyPost('/v1/auth/refreshToken', {}, { 'x-jike-access-token': '', 'x-jike-refresh-token': t.refresh });
-    const at = r.headers['x-jike-access-token'];
-    if (at) { setXyToken(Object.assign(t, { access: at, refresh: r.headers['x-jike-refresh-token'] || t.refresh, at: Date.now() })); return true; }
-  } catch { /* ignore */ }
-  return false;
 }
 
 module.exports = {

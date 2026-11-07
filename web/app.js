@@ -550,7 +550,9 @@ async function doSearch(kw, append) {
       : '/api/search';
     const data = await api(`${ep}?keywords=${encodeURIComponent(kw)}&limit=20&offset=${state.offset}`);
     if (data.error === 'NEED_LOGIN') {
-      $('results').innerHTML = `<div class="song"><div class="meta"><div class="name">需要登录 ${state.provider === 'xy' ? '小宇宙' : ''}</div><div class="artist">${escapeHtml(data.message || '请先登录该平台')}</div></div></div>`;
+      const isXY = state.provider === 'xy';
+      $('results').innerHTML = `<div class="song xy-need"><div class="meta"><div class="name">${isXY ? '小宇宙登录已失效' : '需要登录'}</div><div class="artist">${escapeHtml(data.message || '请先登录该平台')}</div></div>${isXY ? '<button class="brush-btn solid" id="results-login">去登录</button>' : ''}</div>`;
+      if (isXY) $('results-login').onclick = () => openLogin('xy');
       $('more-btn-wrap').hidden = true;
       return;
     }
@@ -985,9 +987,9 @@ async function startQrLogin() {
     pollQr();
   } catch (err) { $('qr-status').textContent = '⚠ ' + err.message; }
 }
-async function openLogin() {
+async function openLogin(lp) {
   $('login-modal').hidden = false;
-  switchLoginTab('netease');
+  switchLoginTab(typeof lp === 'string' ? lp : 'netease');
 }
 async function checkQishuiStatus() {
   const st = $('qishui-cookie-status');
@@ -1033,9 +1035,13 @@ async function checkXYStatus() {
   st.textContent = '查询登录态……';
   try {
     const r = await api('/api/xy/status');
-    st.textContent = r.loggedIn ? '✓ 已登录' + (r.nickname ? '：' + r.nickname : '') : '未登录，粘贴 token 后点「登录」';
+    if (!r.loggedIn) { st.textContent = '未登录，按上面三步获取 token 后点「登录」'; return; }
+    const mins = r.at ? Math.floor((Date.now() - r.at) / 60000) : null;
+    const age = mins === null ? '' : mins < 1 ? '（刚刚获取）' : mins < 60 ? `（${mins} 分钟前获取）` : `（约 ${Math.floor(mins / 60)} 小时前获取）`;
+    st.textContent = '✓ 已登录' + (r.nickname ? '：' + r.nickname : '') + age;
   } catch (e) { st.textContent = '⚠ ' + e.message; }
 }
+$('xy-open-official').addEventListener('click', () => window.open('https://www.xiaoyuzhoufm.com/', '_blank', 'noopener,noreferrer'));
 $('xy-token-save').addEventListener('click', async () => {
   const st = $('xy-token-status');
   const t = $('xy-token-input').value.trim();
@@ -1043,8 +1049,10 @@ $('xy-token-save').addEventListener('click', async () => {
   st.textContent = '验证中……';
   try {
     const r = await api('/api/xy/login/token', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: t }) });
-    if (r.ok) { st.textContent = '✓ 登录成功，可以搜索和听播客了'; }
-    else st.textContent = '⚠ ' + (r.error || 'token 无效');
+    if (r.ok) {
+      st.textContent = '✓ 登录成功，可以搜索和听播客了';
+      $('xy-token-input').value = '';
+    } else st.textContent = '⚠ ' + (r.error || 'token 无效');
   } catch (e) { st.textContent = '⚠ ' + e.message; }
 });
 $('xy-token-clear').addEventListener('click', () => api('/api/xy/logout').then(() => { $('xy-token-status').textContent = '已退出'; }));
