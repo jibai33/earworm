@@ -43,6 +43,28 @@
     <button class="src-tab" data-src="qq">QQ</button>
     <button class="src-tab" data-src="xy">小宇宙</button>
   </div>
+  <!-- ══ 个性化推荐：空查询态展示，来自 Web / Mac / iOS 共用的听感画像 ══ -->
+  <section id="taste-rec" class="taste-rec" hidden>
+    <div class="tr-head">
+      <div class="tr-title">
+        <div class="tr-h">知音 · 为你而鸣</div>
+        <div class="tr-sub" id="tr-sub">正在读取你的听感画像……</div>
+      </div>
+      <div class="tr-actions">
+        <button id="tr-refresh" class="tr-btn">换一批</button>
+        <button id="tr-settings" class="tr-btn ghost">偏好设置</button>
+      </div>
+    </div>
+    <div class="tr-signals" id="tr-signals"></div>
+    <div class="tr-hero" id="tr-hero"></div>
+    <div class="tr-cards" id="tr-cards"></div>
+    <div class="tr-list" id="tr-list"></div>
+    <div class="tr-foot">
+      <span id="tr-foot-note">推荐每小时更新 · 记录仅用于生成推荐</span>
+      <button id="tr-off" class="tr-link">关闭个性化</button>
+    </div>
+  </section>
+
   <div id="search-history-wrap" class="hist-wrap">
     <div class="hist-head"><span class="sec-title small">曾闻</span><button id="hist-clear" class="text-btn">清空</button></div>
     <div id="search-history" class="chips"></div>
@@ -376,7 +398,36 @@
 </div>
 
 <audio id="audio" preload="metadata"></audio>
+<!-- ══ 听感画像设置（同步码 / 跨端 / 隐私） ══ -->
+<div id="taste-modal" class="login-modal" hidden>
+  <div class="login-card taste-card">
+    <span class="seal seal-sm">闻曲</span>
+    <h2>听感画像 · 偏好设置</h2>
+    <p class="login-tip">同一个同步码，Web / Mac / iPhone 共用一份画像。在另一端填入这枚码即可接续。</p>
+    <div class="tk-row">
+      <div class="tk-label">我的同步码</div>
+      <div class="tk-code" id="tk-code">—</div>
+      <button id="tk-copy" class="brush-btn">复制</button>
+      <button id="tk-new" class="brush-btn">换一枚</button>
+    </div>
+    <div class="tk-row">
+      <div class="tk-label">接入另一台设备</div>
+      <input id="tk-input" class="tk-input" placeholder="输入对方显示的 EW-XXXX-XXXX-XXXX" autocomplete="off">
+      <button id="tk-bind" class="brush-btn solid">绑定并合并画像</button>
+    </div>
+    <div class="tk-status" id="tk-status"></div>
+    <div class="tk-actions">
+      <label class="tk-switch"><input type="checkbox" id="tk-enabled" checked> 记录收听 / 搜索 / 浏览</label>
+      <button id="tk-export" class="brush-btn">导出我的数据</button>
+      <button id="tk-clear" class="brush-btn danger">清除记录</button>
+      <button id="tk-close" class="brush-btn solid">完成</button>
+    </div>
+  </div>
+</div>
+
+<script src="./taste.js"></script>
 <script src="./app.js"></script>
+<script src="./taste-ui.js"></script>
 <script>
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js');
 </script>

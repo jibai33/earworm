@@ -39,6 +39,8 @@ const xyApi = require('./modules/xiaoyuzhou-api.js');
 const qishuiQrLogin = require('./modules/qishui-qr-login.js');
 const electronRuntime = require('./modules/electron-runtime');
 const QISHUI_QR_AVAILABLE = electronRuntime.isChromiumShim ? !!electronRuntime.findChrome() : true;
+const tasteProfile = require('./modules/taste-profile.js');
+const recommender = require('./modules/recommend.js');
 const { TrackDecryptor } = require('./modules/qishui-audio-decryptor/track-decryptor');
 const qishuiAudioDecryptor = new TrackDecryptor();
 
@@ -240,6 +242,21 @@ function readBody(req) {
     req.on('data', c => { data += c; if (data.length > 1e6) req.destroy(); });
     req.on('end', () => { try { resolve(data ? JSON.parse(data) : {}); } catch { resolve({}); } });
   });
+}
+
+/* ---------- 听感画像：曲库检索回调 + 推荐缓存 ---------- */
+async function tasteSearch(keyword, limit) {
+  const r = await cloudsearch({ keywords: keyword, limit, offset: 0, cookie: userCookie });
+  return ((r.body.result && r.body.result.songs) || []).map(mapSongRecord);
+}
+const tasteCache = new Map(); // syncKey -> { updatedAt, ts, data }
+async function tasteRecommendations(p, variant = 0) {
+  const ck = p.key + ':' + variant;
+  const hit = tasteCache.get(ck);
+  if (hit && hit.updatedAt === p.updatedAt && Date.now() - hit.ts < 60000) return hit.data;
+  const data = await recommender.buildRecommendations({ events: p.events, profile: p, searchFn: tasteSearch, variant });
+  tasteCache.set(ck, { updatedAt: p.updatedAt, ts: Date.now(), data });
+  return data;
 }
 
 /* ---------- 路由 ---------- */
@@ -590,6 +607,70 @@ const server = http.createServer(async (req, res) => {
       }
       // 通用透传（QQ m4a、网易云外链等）
       return proxyAudio(res, au, range);
+    }
+
+    // ==================== 听感画像 / 个性化推荐（Web + macOS + iOS 共用契约） ====================
+    // 契约：纯 HTTP JSON；同一服务地址 + 同一同步码 = 同一份画像。
+    // 事件 id 由客户端生成，服务端去重，因此多端离线重放不会产生重复记录。
+    if (pn.startsWith('/api/taste/')) {
+      const body = req.method === 'POST' ? await readBody(req) : {};
+      const action = pn.slice('/api/taste/'.length);
+      const key = tasteProfile.normalizeKey(body.syncKey || q.get('syncKey') || '');
+
+      // 首次启动：发一枚新同步码，画像与推荐一次返回
+      if (action === 'bootstrap' && !key) {
+        const fresh = tasteProfile.createSyncKey();
+        const fp = tasteProfile.rawProfile(fresh);
+        return sendJSON(res, {
+          ok: true, syncKey: tasteProfile.prettyKey(fresh), created: true,
+          profile: tasteProfile.getProfile(fresh),
+          recommendations: await tasteRecommendations(fp),
+        });
+      }
+      if (!tasteProfile.isValidKey(key)) {
+        return sendJSON(res, { ok: false, error: '同步码无效（应为 EW-XXXX-XXXX-XXXX）' }, 400);
+      }
+      const p = tasteProfile.rawProfile(key);
+
+      if (action === 'bootstrap') {
+        return sendJSON(res, {
+          ok: true, syncKey: tasteProfile.prettyKey(key), created: false,
+          profile: tasteProfile.getProfile(key),
+          recommendations: await tasteRecommendations(p),
+        });
+      }
+      if (action === 'events' && req.method === 'POST') {
+        if (p.settings.enabled === false) {
+          return sendJSON(res, { ok: true, accepted: 0, ignored: true, reason: '个性化已关闭' });
+        }
+        return sendJSON(res, tasteProfile.ingest({
+          syncKey: key, deviceId: body.deviceId, platform: body.platform,
+          events: body.events,
+        }));
+      }
+      if (action === 'events') {
+        return sendJSON(res, tasteProfile.getEvents(key, q.get('since'), q.get('limit')));
+      }
+      if (action === 'profile') return sendJSON(res, { ok: true, profile: tasteProfile.getProfile(key) });
+      if (action === 'recommend') {
+        const variant = Math.max(0, Math.min(20, Number(q.get('variant') || 0) || 0));
+        return sendJSON(res, { ok: true, syncKey: tasteProfile.prettyKey(key), recommendations: await tasteRecommendations(p, variant) });
+      }
+      if (action === 'settings' && req.method === 'POST') return sendJSON(res, tasteProfile.setSettings(key, body.settings || body));
+      if (action === 'feedback' && req.method === 'POST') return sendJSON(res, tasteProfile.addFeedback(key, body));
+      if (action === 'clear' && req.method === 'POST') return sendJSON(res, tasteProfile.clearProfile(key, { keepSettings: body.keepSettings !== false }));
+      if (action === 'export') return sendJSON(res, tasteProfile.exportProfile(key));
+      if (action === 'sync-key' && req.method === 'POST') {
+        if (body.mode === 'create') {
+          const fresh = tasteProfile.createSyncKey();
+          const merged = tasteProfile.bindSyncKey(key, fresh);
+          return sendJSON(res, Object.assign({ ok: true, created: true }, merged));
+        }
+        const target = tasteProfile.normalizeKey(body.targetKey || '');
+        if (!tasteProfile.isValidKey(target)) return sendJSON(res, { ok: false, error: '目标同步码无效' }, 400);
+        return sendJSON(res, tasteProfile.bindSyncKey(key, target));
+      }
+      return sendJSON(res, { ok: false, error: '未知的画像接口：' + action }, 404);
     }
 
     // ---------- 静态资源 ----------

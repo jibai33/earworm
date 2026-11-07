@@ -6,6 +6,7 @@ node_modules/
 .qishui-token
 modules/.qishui-token
 modules/.qishui-qr-login.json
+data/
 .workbuddy/
 dist/
 .DS_Store
