@@ -91,54 +91,117 @@ async function handleQQSearch(keywords, limit, offset) {
   return { provider: 'qq', songs: list.map(mapQQSong), hasMore: list.length >= limit };
 }
 
-/* ---------- 播放地址 ---------- */
+/* ---------- 播放地址 / VIP 播放授权 ---------- */
+// 官方 vkey 要求两段式文件名：前缀 + songmid + media_mid + 扩展名，
+// 只送单段会拿到 purl，但 CDN 一律 403。
 const QQ_FILENAME_TIERS = [
-  ['F000', 'flac'],   // 无损
-  ['M800', 'mp3'],    // 320k
-  ['C600', 'mp3'],    // 128k
+  ['F000', 'flac'],  // 无损（需会员 + 播放密钥）
+  ['M800', 'mp3'],   // 320k
+  ['M500', 'mp3'],   // 128k
+  ['C400', 'm4a'],   // 试听兜底
 ];
-async function handleQQSongUrl(mid, mediaMid, qualityHint) {
-  if (!mid) return { provider: 'qq', url: '', playable: false, error: 'Missing song mid' };
+const QQ_STREAM_FALLBACKS = [
+  'http://dl.stream.qqmusic.qq.com/',
+  'http://sjy6.stream.qqmusic.qq.com/',
+  'http://ws.stream.qqmusic.qq.com/',
+];
+function playbackKeyOf() {
+  const obj = qqCookieObject();
+  return obj.qm_keyst || obj.musickey || obj.qqmusic_key || obj.music_key || '';
+}
+function qqPlaybackAuth() {
   const info = qqLoginInfo();
-  const guid = String(10000000 + Math.floor(Math.random() * 90000000));
-  const uin = info.uin || '0';
-  // 未登录只可用 C400 m4a（128k）；登录后可试 M800/F000
-  const prefixes = info.loggedIn ? ['M800', 'C400'] : ['C400'];
-  const filenames = prefixes.map(p => `${p}${mediaMid || mid}.${p === 'M800' ? 'mp3' : 'm4a'}`);
+  const key = playbackKeyOf();
+  return {
+    loggedIn: !!(info.uin && key),
+    uin: info.uin || '',
+    hasPlaybackKey: !!key,
+    vipReady: !!(info.uin && key),
+  };
+}
+function qqFilename(tier, mid, mediaMid) {
+  const [prefix, ext] = tier;
+  return `${prefix}${mid}${mediaMid || mid}.${ext}`;
+}
+function pickStreamUrl(data, filenames) {
+  const items = Array.isArray(data.midurlinfo) ? data.midurlinfo : [];
+  const rawSips = Array.isArray(data.sip) ? data.sip.filter(Boolean) : [];
+  const sips = rawSips.filter(s => !String(s).includes('ws.stream'))
+    .concat(rawSips, QQ_STREAM_FALLBACKS);
+  const order = ['F000', 'M800', 'M500', 'C400'];
+  const sorted = items.filter(it => it && it.purl).sort((a, b) => {
+    const ai = order.findIndex(p => String(a.filename || '').startsWith(p));
+    const bi = order.findIndex(p => String(b.filename || '').startsWith(p));
+    return (ai < 0 ? 9 : ai) - (bi < 0 ? 9 : bi);
+  });
+  for (const it of sorted) {
+    const fn = String(it.filename || '');
+    // 只按文件名前缀判定档位；上游偶尔不回 filename，此时按申请列表的首档兜底
+    const prefix = order.find(p => fn.startsWith(p)) || (/^[A-Z]\d{3}/.exec(filenames[0] || '') || [])[0] || '';
+    const level = prefix === 'F000' ? '无损' : prefix === 'M800' ? 'HQ' : prefix === 'M500' ? '320k' : '标准';
+    const domain = String(sips[0]).replace(/\/?$/, '/');
+    return { url: `${domain}${it.purl}`, level };
+  }
+  return null;
+}
+async function requestQQVkey(filenames, mid, guid, uin, modern) {
+  const param = modern ? {
+    filename: filenames, guid, songmid: filenames.map(() => mid),
+    songtype: filenames.map(() => 0), uin: uin || '0', ctx: 0,
+  } : {
+    guid, songmid: filenames.map(() => mid), songtype: filenames.map(() => 0),
+    uin, loginflag: 1, platform: '20', filename: filenames,
+  };
   const payload = {
-    comm: { uin, format: 'json', ct: info.loggedIn ? 19 : 24, cv: 0 },
+    comm: modern
+      ? { ct: 23, cv: 0, uin: uin || '0', tmeAppID: 'qqmusic' }
+      : { uin, format: 'json', ct: uin && uin !== '0' ? 19 : 24, cv: 0 },
     req_0: {
-      module: 'vkey.GetVkeyServer',
-      method: 'CgiGetVkey',
-      param: {
-        guid,
-        songmid: filenames.map(() => mid),
-        songtype: filenames.map(() => 0),
-        uin,
-        loginflag: 1,
-        platform: '20',
-        filename: filenames,
-      },
+      module: modern ? 'music.vkey.GetVkey' : 'vkey.GetVkeyServer',
+      method: modern ? 'UrlGetVkey' : 'CgiGetVkey',
+      param,
     },
   };
   const r = await qqMusicPost(payload, qqCookie);
-  const data = (((r.req_0 || {}).data || {}) || {});
-  const items = (data.midurlinfo || []).filter(it => it && it.purl);
-  const sips = Array.isArray(data.sip) && data.sip.length ? data.sip.filter(Boolean) : ['http://ws.stream.qqmusic.qq.com/'];
-  let url = '', tier = '';
-  outer: for (const sip of sips) {
-    for (const it of items) {
-      const cand = `${String(sip).replace(/\/?$/, '/')}${it.purl}`;
-      const fn = String(it.filename || '');
-      // C400 m4a 未登录可用；M800 mp3 一般要登录
-      url = cand; tier = fn.startsWith('M800') ? 'HQ' : fn.startsWith('F000') ? '无损' : '标准';
-      break outer;
-    }
+  return (((r.req_0 || {}).data || {}) || {});
+}
+async function handleQQSongUrl(mid, mediaMid, qualityHint) {
+  if (!mid) return { provider: 'qq', url: '', playable: false, error: 'Missing song mid' };
+  const auth = qqPlaybackAuth();
+  const uin = auth.uin || '0';
+  const guid = String(10000000 + Math.floor(Math.random() * 90000000));
+  const wantLossless = qualityHint === 'lossless';
+  // 未登录只用试听兜底；登录后按音质从高到低申请，让 VIP 播放密钥参与取流
+  const tiers = !auth.vipReady ? [['C400', 'm4a']]
+    : wantLossless ? QQ_FILENAME_TIERS : QQ_FILENAME_TIERS.filter(t => t[0] !== 'F000');
+  const filenames = tiers.map(t => qqFilename(t, mid, mediaMid));
+
+  let data = {};
+  const errors = [];
+  // 已授权优先走新版 UrlGetVkey（读 musickey），失败再退回旧版 CgiGetVkey
+  const attempts = auth.vipReady ? [true, false] : [false];
+  for (const modern of attempts) {
+    try { data = await requestQQVkey(filenames, mid, guid, uin, modern); }
+    catch (e) { errors.push(e.message); continue; }
+    if (pickStreamUrl(data, filenames)) break;
   }
-  if (!url) {
-    return { provider: 'qq', url: '', playable: false, level: '', error: '取不到 QQ 播放地址（VIP 歌曲需登录）' };
+  const picked = pickStreamUrl(data, filenames);
+  if (!picked) {
+    const reason = !auth.loggedIn
+      ? '取不到播放地址：该曲目可能需要 QQ 音乐登录授权（VIP / 版权限制）'
+      : !auth.hasPlaybackKey
+        ? '取不到播放地址：凭据缺少播放密钥（qm_keyst），请重新扫码登录'
+        : '取不到播放地址：账号可能无该曲目的 VIP 播放授权，或上游暂时不可用';
+    return {
+      provider: 'qq', url: '', playable: false, level: '',
+      error: reason, authorization: auth,
+      detail: errors.length ? errors.join('；') : '',
+    };
   }
-  return { provider: 'qq', url, playable: true, level: tier };
+  return {
+    provider: 'qq', url: picked.url, playable: true, level: picked.level,
+    authorization: auth, vipUnlocked: auth.vipReady && picked.level !== '标准',
+  };
 }
 
 /* ---------- 歌词 ---------- */
@@ -160,6 +223,6 @@ async function handleQQLyric(mid, songId) {
 }
 
 module.exports = {
-  setQQCookie, getQQCookie, qqLoginInfo,
+  setQQCookie, getQQCookie, qqLoginInfo, qqPlaybackAuth,
   handleQQSearch, handleQQSongUrl, handleQQLyric,
 };

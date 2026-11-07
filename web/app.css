@@ -711,6 +711,132 @@ body::before {
   .home { grid-template-columns: 340px 1fr; }
 }
 
+/* ═══ 小宇宙：手机号 + 短信验证码 ═══ */
+.xy-sms { display: grid; gap: 8px; text-align: left; margin: 4px 0 6px; }
+.xy-label { font-size: 11px; letter-spacing: .16em; color: var(--txt-dim); }
+.xy-phone-row, .xy-code-row { display: flex; gap: 8px; }
+.xy-input {
+  min-width: 0; flex: 1; background: rgba(255,255,255,.05); color: var(--txt);
+  border: 1px solid var(--line-2); border-radius: 10px; padding: 10px 12px;
+  font-size: 13px; font-family: var(--sans); outline: none;
+  transition: border-color .2s, box-shadow .2s;
+}
+.xy-input:focus { border-color: rgba(var(--amber-rgb), .5); box-shadow: 0 0 0 3px rgba(var(--amber-rgb), .08); }
+.xy-input::placeholder { color: var(--txt-dim); opacity: .7; }
+select.xy-area { flex: 0 0 88px; font-family: monospace; appearance: none; text-align: center; padding: 10px 6px; }
+.xy-send { flex: 0 0 auto; white-space: nowrap; padding: 10px 14px; font-size: 12px; letter-spacing: .04em; }
+.xy-send:disabled { opacity: .5; cursor: not-allowed; }
+.xy-sms .cookie-row { margin-top: 6px; }
+.xy-sms .cookie-row .brush-btn { margin: 0; }
+.xy-captcha {
+  margin: 10px 0 2px; padding: 12px 14px; border-radius: 12px; text-align: left;
+  background: rgba(var(--amber-rgb), .07); border: 1px solid rgba(var(--amber-rgb), .24);
+}
+.xy-captcha b { display: block; font-family: var(--serif); font-size: 13px; color: var(--amber-2); letter-spacing: .06em; }
+.xy-captcha p { font-size: 11px; line-height: 1.7; color: var(--txt-dim); margin: 6px 0 10px; }
+.xy-manual { margin-top: 12px; text-align: left; }
+.xy-manual summary { font-size: 11px; color: var(--txt-dim); cursor: pointer; letter-spacing: .06em; }
+.xy-manual summary:hover { color: var(--amber); }
+.xy-manual .cookie-input { margin: 8px 0; }
+.xy-manual .brush-btn { width: 100%; font-size: 12px; }
+.login-card:has(#lp-qishui:not([hidden])) { width: min(92vw, 400px); }
+.qr-actions { display: flex; gap: 10px; justify-content: center; margin-top: 12px; }
+.qr-actions .brush-btn { margin: 0; flex: 1; font-size: 12px; padding: 9px 10px; }
+
+/* QQ 音乐：三条扫码通道 + VIP 播放授权 */
+.login-card:has(#lp-qq:not([hidden])) { width: min(92vw, 400px); }
+.qq-channels { display: flex; gap: 6px; justify-content: center; margin: 0 0 14px; flex-wrap: wrap; }
+.qq-channel {
+  background: none; border: 1px solid var(--line); color: var(--txt-dim);
+  border-radius: 999px; padding: 6px 12px; font-size: 12px; cursor: pointer;
+  font-family: var(--serif); letter-spacing: .06em; transition: all .18s;
+}
+.qq-channel:hover { color: var(--txt); border-color: rgba(var(--amber-rgb), .3); }
+.qq-channel.cur {
+  color: var(--amber); border-color: rgba(var(--amber-rgb), .55);
+  background: rgba(var(--amber-rgb), .09); box-shadow: 0 0 0 3px rgba(var(--amber-rgb), .06);
+}
+.qq-vip-status {
+  margin: -4px 0 12px; padding: 9px 12px; border-radius: 10px; text-align: left;
+  font-size: 11px; line-height: 1.7; color: var(--txt-dim);
+  background: rgba(255,255,255,.04); border: 1px solid var(--line);
+}
+.qq-vip-status.ready { color: var(--amber-2); border-color: rgba(var(--amber-rgb), .35); background: rgba(var(--amber-rgb), .07); }
+.qq-vip-status b { font-family: var(--serif); letter-spacing: .06em; }
+
+/* ═══════════════════════════════════════════════
+   v3 细节打磨 · 交互墨光 / 封面染色 / 视差 / 层级
+   ═══════════════════════════════════════════════ */
+
+/* 卡片：跟随指针的琥珀墨光（::after 已被入场扫光占用，这里用 ::before） */
+.b-card::before {
+  content: ''; position: absolute; inset: 0; z-index: 2; border-radius: inherit;
+  pointer-events: none; opacity: 0; transition: opacity .32s ease;
+  mix-blend-mode: screen;
+  background: radial-gradient(340px circle at var(--mx, 50%) var(--my, 50%),
+    rgba(var(--home-ink, 230,176,106), .15), rgba(var(--home-ink, 230,176,106), .04) 42%, transparent 72%);
+}
+.b-card:hover::before { opacity: 1; }
+
+/* hover 的边框与外发光改用「当前封面的墨色」，而非一律琥珀 */
+.b-card[role="button"]:hover {
+  border-color: rgba(var(--home-ink, 230,176,106), .46);
+  box-shadow: var(--shadow-pop), 0 0 0 1px rgba(var(--home-ink, 230,176,106), .09);
+}
+.orb-play:not(.sm) {
+  box-shadow: 0 8px 24px rgba(var(--home-ink, 230,176,106), .42), 0 0 0 1px rgba(255,255,255,.08) inset;
+}
+
+/* 继续听主卡：封面衍生的墨晕压在遮罩上，取色变化会顺着渐变渗出来 */
+.bc-continue .b-veil {
+  background:
+    radial-gradient(ellipse 72% 125% at 84% 38%, rgba(var(--home-ink, 230,176,106), .22), transparent 72%),
+    linear-gradient(100deg, rgba(11,13,16,.9) 24%, rgba(11,13,16,.22) 80%);
+  transition: background .8s ease;
+}
+/* 主卡左下角一枚极淡的墨印， hover 时渗出 */
+.bc-continue::after {
+  content: '聽'; position: absolute; left: -12px; bottom: -46px; z-index: 1;
+  font-family: var(--serif); font-size: 132px; line-height: 1; pointer-events: none;
+  color: rgba(var(--home-ink, 230,176,106), .055);
+  transform: translateY(10px) rotate(-8deg); transition: transform .6s ease, color .6s ease;
+}
+.bc-continue:hover::after { transform: translateY(0) rotate(-8deg); color: rgba(var(--home-ink, 230,176,106), .1); }
+
+/* 顶栏：页面滚动后浮起一道墨线，把内容与导航分开 */
+.topbar { transition: box-shadow .4s ease; }
+body.is-scrolled .topbar {
+  box-shadow: 0 1px 0 rgba(var(--home-ink, 230,176,106), .16), 0 14px 34px rgba(0,0,0,.34);
+}
+/* 搜索胶囊聚焦：墨晕呼吸光环 */
+.search-pill:focus-within {
+  border-color: rgba(var(--home-ink, 230,176,106), .5);
+  box-shadow: var(--shadow-pop), 0 0 0 3px rgba(var(--home-ink, 230,176,106), .07),
+              0 0 30px rgba(var(--home-ink, 230,176,106), .14);
+}
+
+/* 墨染 canvas 的视差位移由 JS 写入 transform */
+#ink { transition: transform .55s cubic-bezier(.2,.8,.3,1); }
+
+/* 当前歌词：一行极淡的墨迹从中心洇开 */
+.lyrics .line { position: relative; }
+.lyrics .line.cur::after {
+  content: ''; position: absolute; left: 12%; right: 12%; bottom: 3px; height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(var(--ink-glow-rgb), .5), transparent);
+  transform: scaleX(.35); opacity: 0;
+  animation: inkLine 1.25s cubic-bezier(.2,.8,.3,1) forwards;
+}
+@keyframes inkLine { to { transform: scaleX(1); opacity: 1; } }
+
+/* 播放条进度：末端一枚墨点流光，随播放推进 */
+.bar-progress i { position: relative; }
+.bar-progress i::after {
+  content: ''; position: absolute; right: -3px; top: -2px; width: 18px; height: 6px;
+  background: radial-gradient(ellipse at center, rgba(var(--amber-2), .9), transparent 70%);
+  filter: blur(1px); pointer-events: none;
+}
+.playerbar img { box-shadow: 0 4px 14px rgba(0,0,0,.45), 0 0 0 1px rgba(var(--amber-rgb), .08); }
+
 /* ═══ 减少动态效果：尊重系统无障碍设置 ═══ */
 @media (prefers-reduced-motion: reduce) {
   .b-card, .b-card::after, .side-panel > *, .rail-card, .pl-cell,
@@ -719,7 +845,9 @@ body::before {
   .playerbar img, .cover-ring {
     animation: none !important;
   }
-  .b-card::after, #ink { display: none; }
+  .b-card::after, .b-card::before, .bc-continue::after, #ink { display: none; }
+  .lyrics .line.cur::after { animation: none; opacity: .6; transform: none; }
+  .b-card, .search-pill, .topbar, .bc-continue .b-veil { transition: none !important; }
   .stage { transition: none !important; }
   * { scroll-behavior: auto !important; }
 }

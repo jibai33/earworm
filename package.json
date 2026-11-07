@@ -10,7 +10,8 @@
     "start": "node server.js"
   },
   "dependencies": {
-    "NeteaseCloudMusicApi": "^4.32.0"
+    "NeteaseCloudMusicApi": "^4.32.0",
+    "puppeteer-core": "^25.16.0"
   },
   "overrides": {
     "axios": "1.18.1",

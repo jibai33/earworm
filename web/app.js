@@ -377,6 +377,7 @@ function updateContinueCard() {
     $('hero-play').onclick = (e) => { e.stopPropagation(); state.queue = daily.slice(); renderQueue(); playIndex(0); };
   } else return;
   $('bento-continue').onclick = () => $('hero-play').click();
+  tintHomeCover($('hero-cover').src);
 }
 function renderNextUp() {
   const next = state.queue[state.index + 1] || state.queue[0];
@@ -972,8 +973,10 @@ function switchLoginTab(lp) {
   $('login-tabs').querySelectorAll('.login-tab').forEach(b => b.classList.toggle('cur', b.dataset.lp === lp));
   ['netease', 'qishui', 'qq', 'xy'].forEach(p => { $('lp-' + p).hidden = p !== lp; });
   if (lp === 'netease') startQrLogin();
-  if (lp === 'qishui') checkQishuiStatus();
-  if (lp === 'qq') checkQQStatus();
+  if (lp === 'qishui') { checkQishuiStatus(); if (!qishuiQrTimer && !qishuiQrToken) startQishuiQr(); }
+  else stopQishuiQrPoll();
+  if (lp === 'qq') { checkQQStatus(); refreshQQVipStatus(); if (!qqQrTimer && !qqQrId) startQQQr(); }
+  else stopQQQrPoll();
   if (lp === 'xy') checkXYStatus();
 }
 async function startQrLogin() {
@@ -991,22 +994,148 @@ async function openLogin(lp) {
   $('login-modal').hidden = false;
   switchLoginTab(typeof lp === 'string' ? lp : 'netease');
 }
+let qishuiQrToken = '', qishuiQrTimer = null;
+function stopQishuiQrPoll() {
+  if (qishuiQrTimer) { clearInterval(qishuiQrTimer); qishuiQrTimer = null; }
+}
 async function checkQishuiStatus() {
   const st = $('qishui-cookie-status');
   st.textContent = '查询登录态……';
   try {
     const r = await api('/api/qishui/status');
-    st.textContent = r.loggedIn ? `✓ 已登录：${r.nickname || r.userId}（${r.vipLabel || r.vipLevel || ''}）` : '未登录，粘贴 cookie 后点「登录」';
+    st.textContent = r.loggedIn
+      ? `✓ 已登录：${r.nickname || r.userId}（${r.vipLabel || r.vipLevel || ''}）`
+      : (r.qrAvailable ? '未登录，用抖音 App 扫上面的二维码' : '未登录；当前机器没有 Chrome / Electron，请用下方手动粘贴 cookie');
   } catch (e) { st.textContent = '⚠ ' + e.message; }
 }
+
+/* 抖音 App 扫码：二维码由服务端签名引擎生成，前端只负责展示与轮询 */
+async function startQishuiQr() {
+  stopQishuiQrPoll();
+  const qrSt = $('qishui-qr-status'), img = $('qishui-qr-img'), btn = $('qishui-qr-refresh');
+  btn.disabled = true; img.hidden = true;
+  qrSt.textContent = '正在生成二维码（首次要启动本机浏览器内核，约 5–15 秒）……';
+  try {
+    const r = await api('/api/qishui/login/qrcode', { method: 'POST' });
+    if (!r.ok || !r.qrcode) { qrSt.textContent = '⚠ ' + (r.error || '二维码生成失败'); btn.disabled = false; return; }
+    qishuiQrToken = r.token;
+    img.src = r.qrcode; img.hidden = false; btn.disabled = false;
+    qrSt.textContent = '请用抖音 App 扫码，并在手机上确认';
+    qishuiQrTimer = setInterval(async () => {
+      if (!qishuiQrToken || $('login-modal').hidden) { stopQishuiQrPoll(); return; }
+      try {
+        const c = await api('/api/qishui/login/check?token=' + encodeURIComponent(qishuiQrToken));
+        if (!c.ok) return;
+        const s = String(c.status || '');
+        if (c.confirmed) {
+          stopQishuiQrPoll(); qishuiQrToken = '';
+          qrSt.textContent = '✓ 登录成功，凭据已存到本机';
+          checkQishuiStatus(); refreshLoginStatus();
+        } else if (s === '3' || s === 'confirmed') qrSt.textContent = '已确认，正在写入凭据……';
+        else if (s === '2' || s === 'scanned') qrSt.textContent = '已扫码，请在手机上点确认';
+        else if (Number(c.error_code) === 2 || s === 'expired') {
+          stopQishuiQrPoll(); qishuiQrToken = '';
+          qrSt.textContent = '二维码已过期，点「生成 / 刷新二维码」重试';
+        } else qrSt.textContent = '等待扫码…';
+      } catch { /* 网络抖动忽略 */ }
+    }, 2500);
+  } catch (e) { qrSt.textContent = '⚠ ' + e.message; btn.disabled = false; }
+}
+$('qishui-qr-refresh').addEventListener('click', startQishuiQr);
+$('qishui-qr-clear').addEventListener('click', () => {
+  stopQishuiQrPoll(); qishuiQrToken = '';
+  api('/api/qishui/logout').then(() => {
+    $('qishui-qr-img').hidden = true;
+    $('qishui-qr-status').textContent = '点上面按钮生成二维码';
+    $('qishui-cookie-status').textContent = '已退出';
+    refreshLoginStatus();
+  });
+});
 async function checkQQStatus() {
   const st = $('qq-cookie-status');
   st.textContent = '查询登录态……';
   try {
     const r = await api('/api/qq/status');
-    st.textContent = r.loggedIn ? `✓ 已登录：${r.nickname || r.uin}` : '未登录，粘贴 cookie 后点「登录」（VIP 歌曲需登录）';
+    const auth = r.authorization || {};
+    st.textContent = r.loggedIn
+      ? `✓ 已登录：${r.nickname || r.uin} · ${auth.label || '播放授权已保存'}`
+      : '未登录，扫码后自动保存凭据（VIP 歌曲需登录）';
   } catch (e) { st.textContent = '⚠ ' + e.message; }
 }
+
+/* QQ 音乐：三条扫码通道（手机 QQ / 微信 / QQ 音乐 App），凭据由服务端换取并落盘 */
+let qqQrChannel = 'qq', qqQrId = '', qqQrTimer = null, qqQrBusy = false;
+function stopQQQrPoll() {
+  if (qqQrTimer) { clearInterval(qqQrTimer); qqQrTimer = null; }
+  qqQrBusy = false;
+}
+async function refreshQQVipStatus() {
+  const box = $('qq-vip-status');
+  box.classList.remove('ready');
+  box.textContent = '正在检查 VIP 播放授权…';
+  try {
+    const r = await api('/api/qq/playback/auth');
+    if (!r.loggedIn) {
+      box.textContent = 'VIP 播放授权 · 未登录。扫码成功后会自动换取播放密钥，解锁 VIP / 无损曲目。';
+      return;
+    }
+    const who = r.uin ? ` · uin ${r.uin}` : '';
+    const vip = r.vipKnown ? ` · ${r.vipLabel}` : ' · 会员态待确认';
+    box.classList.add('ready');
+    box.innerHTML = `<b>VIP 播放授权已就绪</b>${who}${vip}<br>${escapeHtml(r.hint || '')}`;
+  } catch (e) { box.textContent = '⚠ 授权状态查询失败：' + e.message; }
+}
+async function startQQQr() {
+  stopQQQrPoll();
+  const st = $('qq-qr-status'), img = $('qq-qr-img'), btn = $('qq-qr-refresh');
+  btn.disabled = true; img.hidden = true;
+  st.textContent = '正在生成二维码…';
+  try {
+    const r = await api('/api/qq/qr/create', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ channel: qqQrChannel }),
+    });
+    if (!r.ok || !r.qrcode) { st.textContent = '⚠ ' + (r.error || '二维码生成失败'); btn.disabled = false; return; }
+    qqQrId = r.id;
+    img.src = r.qrcode; img.hidden = false; btn.disabled = false;
+    st.textContent = r.hint || '请用对应 App 扫码并在手机上确认';
+    qqQrTimer = setInterval(async () => {
+      if (!qqQrId || $('login-modal').hidden || qqQrBusy) { if (!qqQrId) stopQQQrPoll(); return; }
+      qqQrBusy = true;
+      try {
+        const c = await api(`/api/qq/qr/check?channel=${encodeURIComponent(qqQrChannel)}&id=${encodeURIComponent(qqQrId)}`);
+        if (!c.ok) { st.textContent = '⚠ ' + (c.message || c.error || '状态查询失败'); return; }
+        if (c.confirmed) {
+          stopQQQrPoll(); qqQrId = '';
+          st.textContent = '✓ 登录成功，凭据与播放授权已存到本机';
+          img.hidden = true;
+          checkQQStatus(); refreshQQVipStatus(); refreshLoginStatus();
+          return;
+        }
+        st.textContent = c.message || '等待扫码…';
+        if (c.status === 'expired' || c.status === 'canceled') { stopQQQrPoll(); qqQrId = ''; }
+      } catch { /* 网络抖动忽略 */ }
+      finally { qqQrBusy = false; }
+    }, 2500);
+  } catch (e) { st.textContent = '⚠ ' + e.message; btn.disabled = false; }
+}
+$('qq-channels').querySelectorAll('.qq-channel').forEach(b => b.addEventListener('click', () => {
+  qqQrChannel = b.dataset.qqChannel || 'qq';
+  $('qq-channels').querySelectorAll('.qq-channel').forEach(x => x.classList.toggle('cur', x === b));
+  qqQrId = ''; startQQQr();
+}));
+$('qq-qr-refresh').addEventListener('click', () => { qqQrId = ''; startQQQr(); });
+$('qq-qr-clear').addEventListener('click', () => {
+  stopQQQrPoll(); qqQrId = '';
+  api('/api/qq/logout').then(() => {
+    $('qq-qr-img').hidden = true;
+    $('qq-qr-status').textContent = '点「生成 / 刷新二维码」重新扫码';
+    $('qq-cookie-status').textContent = '已退出';
+    $('qq-vip-status').classList.remove('ready');
+    $('qq-vip-status').textContent = 'VIP 播放授权 · 未登录';
+    refreshLoginStatus();
+  });
+});
 $('login-tabs').querySelectorAll('.login-tab').forEach(b => b.addEventListener('click', () => switchLoginTab(b.dataset.lp)));
 $('qishui-cookie-save').addEventListener('click', async () => {
   const st = $('qishui-cookie-status');
@@ -1015,10 +1144,10 @@ $('qishui-cookie-save').addEventListener('click', async () => {
   st.textContent = '保存中……';
   try {
     const r = await api('/api/qishui/login/cookie', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ cookie: c }) });
-    st.textContent = r.loggedIn ? '✓ 登录成功' : '⚠ cookie 无效或不含登录态';
+    st.textContent = r.loggedIn ? '✓ 凭据已保存' : '⚠ cookie 无效或不含登录态';
+    if (r.loggedIn) refreshLoginStatus();
   } catch (e) { st.textContent = '⚠ ' + e.message; }
 });
-$('qishui-cookie-clear').addEventListener('click', () => api('/api/qishui/logout').then(() => { $('qishui-cookie-status').textContent = '已退出'; }));
 $('qq-cookie-save').addEventListener('click', async () => {
   const st = $('qq-cookie-status');
   const c = $('qq-cookie-input').value.trim();
@@ -1027,35 +1156,90 @@ $('qq-cookie-save').addEventListener('click', async () => {
   try {
     const r = await api('/api/qq/login/cookie', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ cookie: c }) });
     st.textContent = r.loggedIn ? `✓ 登录成功：${r.nickname || r.uin}` : '⚠ cookie 无效或不含 uin/qm_keyst';
+    if (r.loggedIn) { refreshQQVipStatus(); refreshLoginStatus(); }
   } catch (e) { st.textContent = '⚠ ' + e.message; }
 });
-$('qq-cookie-clear').addEventListener('click', () => api('/api/qq/logout').then(() => { $('qq-cookie-status').textContent = '已退出'; }));
+const xyStatus = () => $('xy-token-status');
+const xyCreds = () => ({ areaCode: $('xy-area').value, mobilePhoneNumber: $('xy-phone').value.trim() });
+const xyPost = (path, body) => api(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+
 async function checkXYStatus() {
-  const st = $('xy-token-status');
+  const st = xyStatus();
   st.textContent = '查询登录态……';
   try {
     const r = await api('/api/xy/status');
-    if (!r.loggedIn) { st.textContent = '未登录，按上面三步获取 token 后点「登录」'; return; }
+    if (!r.loggedIn) { st.textContent = '未登录，填手机号收验证码后点「登录并保存」'; return; }
     const mins = r.at ? Math.floor((Date.now() - r.at) / 60000) : null;
-    const age = mins === null ? '' : mins < 1 ? '（刚刚获取）' : mins < 60 ? `（${mins} 分钟前获取）` : `（约 ${Math.floor(mins / 60)} 小时前获取）`;
-    st.textContent = '✓ 已登录' + (r.nickname ? '：' + r.nickname : '') + age;
+    const age = mins === null ? '' : mins < 1 ? '（刚刚获取）' : mins < 60 ? `（${mins} 分钟前）` : `（约 ${Math.floor(mins / 60)} 小时前）`;
+    const who = r.nickname || r.phone || '';
+    const via = r.via === 'sms' ? '短信登录' : '手动凭据';
+    st.textContent = '✓ 已登录' + (who ? '：' + who : '') + ' · ' + via + age;
   } catch (e) { st.textContent = '⚠ ' + e.message; }
 }
+
 $('xy-open-official').addEventListener('click', () => window.open('https://www.xiaoyuzhoufm.com/', '_blank', 'noopener,noreferrer'));
+
+let xySendTimer = null;
+$('xy-send').addEventListener('click', async () => {
+  const btn = $('xy-send'), st = xyStatus();
+  const creds = xyCreds();
+  if (!creds.mobilePhoneNumber) { st.textContent = '⚠ 请先填手机号'; return; }
+  btn.disabled = true; st.textContent = '正在请求发送验证码……';
+  try {
+    const r = await xyPost('/api/xy/login/send-code', creds);
+    if (r.ok) {
+      st.textContent = '✓ ' + (r.message || '验证码已发送') + '，收到后填到上面';
+      $('xy-captcha-tip').hidden = true;
+      let left = 60;
+      btn.textContent = left + 's 后重发';
+      clearInterval(xySendTimer);
+      xySendTimer = setInterval(() => {
+        if (--left <= 0) { clearInterval(xySendTimer); btn.textContent = '获取验证码'; btn.disabled = false; }
+        else btn.textContent = left + 's 后重发';
+      }, 1000);
+    } else {
+      btn.disabled = false; btn.textContent = '获取验证码';
+      $('xy-captcha-tip').hidden = !(r.needCaptcha || r.captchaInvalid);
+      st.textContent = '⚠ ' + (r.message || '发送失败');
+    }
+  } catch (e) {
+    btn.disabled = false; btn.textContent = '获取验证码';
+    st.textContent = '⚠ ' + e.message;
+  }
+});
+
+$('xy-sms-login').addEventListener('click', async () => {
+  const btn = $('xy-sms-login'), st = xyStatus();
+  const body = Object.assign(xyCreds(), { verifyCode: $('xy-code').value.trim() });
+  if (!body.mobilePhoneNumber || !body.verifyCode) { st.textContent = '⚠ 请填手机号和验证码'; return; }
+  btn.disabled = true; st.textContent = '正在验证并保存凭据……';
+  try {
+    const r = await xyPost('/api/xy/login/sms', body);
+    if (r.ok) {
+      st.textContent = '✓ 登录成功，凭据已存到本机，可以搜索和听播客了';
+      $('xy-code').value = '';
+      $('xy-captcha-tip').hidden = true;
+      refreshLoginStatus();
+    } else {
+      st.textContent = '⚠ ' + (r.message || '登录失败');
+      if (r.needManualToken) document.querySelector('.xy-manual').open = true;
+    }
+  } catch (e) { st.textContent = '⚠ ' + e.message; }
+  finally { btn.disabled = false; }
+});
+
 $('xy-token-save').addEventListener('click', async () => {
-  const st = $('xy-token-status');
+  const st = xyStatus();
   const t = $('xy-token-input').value.trim();
   if (!t) { st.textContent = '⚠ 请先粘贴 token'; return; }
   st.textContent = '验证中……';
   try {
-    const r = await api('/api/xy/login/token', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: t }) });
-    if (r.ok) {
-      st.textContent = '✓ 登录成功，可以搜索和听播客了';
-      $('xy-token-input').value = '';
-    } else st.textContent = '⚠ ' + (r.error || 'token 无效');
+    const r = await xyPost('/api/xy/login/token', { token: t });
+    if (r.ok) { st.textContent = '✓ 凭据已保存，可以搜索和听播客了'; $('xy-token-input').value = ''; refreshLoginStatus(); }
+    else st.textContent = '⚠ ' + (r.error || r.message || 'token 无效');
   } catch (e) { st.textContent = '⚠ ' + e.message; }
 });
-$('xy-token-clear').addEventListener('click', () => api('/api/xy/logout').then(() => { $('xy-token-status').textContent = '已退出'; }));
+$('xy-token-clear').addEventListener('click', () => api('/api/xy/logout').then(() => { xyStatus().textContent = '已退出'; refreshLoginStatus(); }));
 function pollQr() {
   clearInterval(state.qrTimer);
   state.qrTimer = setInterval(async () => {
@@ -1075,7 +1259,12 @@ function pollQr() {
   }, 2500);
 }
 $('login-btn').addEventListener('click', openLogin);
-$('login-close').addEventListener('click', () => { $('login-modal').hidden = true; clearInterval(state.qrTimer); state.qrKey = null; });
+$('login-close').addEventListener('click', () => {
+  $('login-modal').hidden = true;
+  clearInterval(state.qrTimer); state.qrKey = null;
+  stopQishuiQrPoll();
+  if (typeof stopQQQrPoll === 'function') stopQQQrPoll();
+});
 
 /* ---------- 倍速 ---------- */
 const RATES = [1, 1.25, 1.5, 2, 0.75];
@@ -1223,6 +1412,58 @@ document.addEventListener('keydown', (e) => {
   else if (e.code === 'ArrowUp') { audio.volume = Math.min(1, audio.volume + .1); $('bar-vol').value = Math.round(audio.volume * 100); localStorage.setItem('ew_vol', audio.volume); }
   else if (e.code === 'ArrowDown') { audio.volume = Math.max(0, audio.volume - .1); $('bar-vol').value = Math.round(audio.volume * 100); localStorage.setItem('ew_vol', audio.volume); }
 });
+
+/* ---------- v3 视觉打磨：首页取色 / 指针墨光 / 舞台视差 / 滚动层次 ---------- */
+const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/* 首页取色比舞台更克制：六成琥珀打底，只让封面渗一点点墨色出来 */
+function tintHomeCover(src) {
+  if (!src) return;
+  const img = new Image();
+  img.onload = () => {
+    try {
+      const c = document.createElement('canvas'); c.width = c.height = 16;
+      const cx = c.getContext('2d', { willReadFrequently: true });
+      cx.drawImage(img, 0, 0, 16, 16);
+      const d = cx.getImageData(0, 0, 16, 16).data;
+      let r = 0, g = 0, b = 0, n = 0;
+      for (let i = 0; i < d.length; i += 4) {
+        const lum = d[i] * .299 + d[i + 1] * .587 + d[i + 2] * .114;
+        if (d[i + 3] < 40 || lum < 18 || lum > 240) continue;
+        r += d[i]; g += d[i + 1]; b += d[i + 2]; n++;
+      }
+      if (!n) return;
+      const base = [230, 176, 106];
+      const rgb = [r / n, g / n, b / n].map((v, i) => Math.round(v * .4 + base[i] * .6));
+      document.documentElement.style.setProperty('--home-ink', rgb.join(','));
+    } catch { /* 图不可读时保持琥珀 */ }
+  };
+  img.src = src;
+}
+
+/* 卡片：指针位置驱动径向墨光 */
+document.addEventListener('pointermove', (e) => {
+  const card = e.target && e.target.closest && e.target.closest('.b-card');
+  if (!card) return;
+  const r = card.getBoundingClientRect();
+  if (!r.width || !r.height) return;
+  card.style.setProperty('--mx', (((e.clientX - r.left) / r.width) * 100).toFixed(1) + '%');
+  card.style.setProperty('--my', (((e.clientY - r.top) / r.height) * 100).toFixed(1) + '%');
+}, { passive: true });
+
+/* 舞台：墨晕随指针轻微反向漂移，形成景深 */
+if (!reduceMotion) {
+  inkStage.addEventListener('pointermove', (e) => {
+    const nx = e.clientX / innerWidth - .5, ny = e.clientY / innerHeight - .5;
+    inkCanvas.style.transform = `translate3d(${(nx * -22).toFixed(1)}px, ${(ny * -22).toFixed(1)}px, 0)`;
+  }, { passive: true });
+  inkStage.addEventListener('pointerleave', () => { inkCanvas.style.transform = ''; });
+}
+
+/* 页面滚动后给顶栏一道墨线 */
+document.querySelectorAll('.page').forEach(p => p.addEventListener('scroll', () => {
+  document.body.classList.toggle('is-scrolled', p.scrollTop > 12);
+}, { passive: true }));
 
 /* ---------- 启动 ---------- */
 renderHist();

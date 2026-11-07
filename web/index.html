@@ -281,47 +281,94 @@
       <div id="qr-status" class="qr-status">正在生成二维码…</div>
     </div>
 
-    <!-- 汽水：粘贴 cookie -->
+    <!-- 汽水：抖音 App 扫码 -->
     <div id="lp-qishui" hidden>
-      <h2>登录 · 汽水音乐</h2>
-      <p class="login-tip">在电脑浏览器打开 qishui.com 并登录，F12 → Application → Cookies，复制整段 cookie 粘贴到下面</p>
-      <textarea id="qishui-cookie-input" class="cookie-input" rows="4" placeholder="粘贴汽水 cookie……"></textarea>
-      <div class="cookie-row">
-        <button id="qishui-cookie-save" class="brush-btn solid">登录</button>
-        <button id="qishui-cookie-clear" class="brush-btn danger">退出</button>
+      <h2>扫码登录 · 汽水音乐</h2>
+      <p class="login-tip">用 <b>抖音 App</b> 扫下面的二维码，在手机上确认后凭据自动存到本机</p>
+      <div class="qr-wrap"><img id="qishui-qr-img" alt="抖音扫码二维码"></div>
+      <div class="qr-actions">
+        <button id="qishui-qr-refresh" class="brush-btn solid">生成 / 刷新二维码</button>
+        <button id="qishui-qr-clear" class="brush-btn danger">退出</button>
       </div>
+      <div id="qishui-qr-status" class="qr-status">点上面按钮生成二维码</div>
+      <details class="xy-manual">
+        <summary>扫码不可用？手动粘贴 cookie</summary>
+        <textarea id="qishui-cookie-input" class="cookie-input" rows="2" placeholder="粘贴汽水 cookie……"></textarea>
+        <button id="qishui-cookie-save" class="brush-btn">保存凭据</button>
+      </details>
       <div id="qishui-cookie-status" class="qr-status">未查询登录态</div>
     </div>
 
-    <!-- QQ：粘贴 cookie -->
+    <!-- QQ 音乐：三条扫码通道 + VIP 播放授权 -->
     <div id="lp-qq" hidden>
-      <h2>登录 · QQ 音乐</h2>
-      <p class="login-tip">在电脑浏览器打开 y.qq.com 并登录，F12 → Network 任意请求的 Cookie 头，整段复制粘贴</p>
-      <textarea id="qq-cookie-input" class="cookie-input" rows="4" placeholder="粘贴 QQ 音乐 cookie（含 uin 与 qm_keyst）……"></textarea>
-      <div class="cookie-row">
-        <button id="qq-cookie-save" class="brush-btn solid">登录</button>
-        <button id="qq-cookie-clear" class="brush-btn danger">退出</button>
+      <h2>扫码登录 · QQ 音乐</h2>
+      <p class="login-tip">任选一条通道扫码；登录成功后凭据自动存到本机，并解锁 VIP / 无损曲目的播放授权</p>
+      <div class="qq-channels" id="qq-channels">
+        <button class="qq-channel cur" data-qq-channel="qq">手机 QQ</button>
+        <button class="qq-channel" data-qq-channel="wechat">微信</button>
+        <button class="qq-channel" data-qq-channel="qqmusic">QQ 音乐 App</button>
       </div>
+      <div class="qr-wrap"><img id="qq-qr-img" alt="QQ 音乐登录二维码"></div>
+      <div class="qr-actions">
+        <button id="qq-qr-refresh" class="brush-btn solid">生成 / 刷新二维码</button>
+        <button id="qq-qr-clear" class="brush-btn danger">退出</button>
+      </div>
+      <div id="qq-qr-status" class="qr-status">正在生成二维码…</div>
+      <div id="qq-vip-status" class="qq-vip-status">正在检查 VIP 播放授权…</div>
+      <details class="xy-manual">
+        <summary>扫码不可用？手动粘贴 cookie（需含 uin 与 qm_keyst）</summary>
+        <p class="login-tip">在电脑浏览器打开 y.qq.com 并登录，F12 → Network 任意请求的 Cookie 头，整段复制粘贴</p>
+        <textarea id="qq-cookie-input" class="cookie-input" rows="3" placeholder="粘贴 QQ 音乐 cookie（含 uin 与 qm_keyst）……"></textarea>
+        <button id="qq-cookie-save" class="brush-btn">保存凭据</button>
+      </details>
       <div id="qq-cookie-status" class="qr-status">未查询登录态</div>
     </div>
 
-    <!-- 小宇宙：官网扫码 + token -->
+    <!-- 小宇宙：手机号 + 短信验证码 -->
     <div id="lp-xy" hidden>
       <h2>登录 · 小宇宙</h2>
-      <p class="login-tip">二维码由小宇宙官网生成，先在官网用 App 扫码，再把凭据交给闻曲</p>
-      <ol class="xy-steps">
-        <li><span>壹</span><div><b>打开官网并登录</b><em>www.xiaoyuzhoufm.com</em></div></li>
-        <li><span>贰</span><div><b>用小宇宙 App 扫码</b><em>扫页面二维码，在手机上确认</em></div></li>
-        <li><span>叁</span><div><b>复制请求头</b><em>F12 → Network → 任一 api 请求</em><em>复制 <code>x-jike-access-token</code> 的值</em></div></li>
-      </ol>
-      <button id="xy-open-official" class="brush-btn xy-open">打开官方扫码页 ↗</button>
-      <textarea id="xy-token-input" class="cookie-input" rows="3" placeholder="粘贴 token……（可整段复制请求头）"></textarea>
-      <div class="cookie-row">
-        <button id="xy-token-save" class="brush-btn solid">登录</button>
-        <button id="xy-token-clear" class="brush-btn danger">退出</button>
+      <p class="login-tip">手机号收验证码，验证通过后自动换取凭据并存到本机</p>
+
+      <div class="xy-sms">
+        <label class="xy-label" for="xy-phone">壹 · 手机号</label>
+        <div class="xy-phone-row">
+          <select id="xy-area" class="xy-input xy-area" aria-label="区号">
+            <option value="+86">+86</option>
+            <option value="+852">+852</option>
+            <option value="+886">+886</option>
+            <option value="+1">+1</option>
+            <option value="+81">+81</option>
+            <option value="+44">+44</option>
+          </select>
+          <input id="xy-phone" class="xy-input" type="tel" inputmode="numeric" autocomplete="tel-national" placeholder="请输入手机号" maxlength="20">
+        </div>
+
+        <label class="xy-label" for="xy-code">贰 · 短信验证码</label>
+        <div class="xy-code-row">
+          <input id="xy-code" class="xy-input" type="text" inputmode="numeric" autocomplete="one-time-code" placeholder="收到的数字验证码" maxlength="8">
+          <button id="xy-send" class="brush-btn xy-send">获取验证码</button>
+        </div>
+
+        <div class="cookie-row">
+          <button id="xy-sms-login" class="brush-btn solid">叁 · 登录并保存</button>
+          <button id="xy-token-clear" class="brush-btn danger">退出</button>
+        </div>
       </div>
+
+      <div id="xy-captcha-tip" class="xy-captcha" hidden>
+        <b>发码需要一次人机验证</b>
+        <p>小宇宙官网在发送短信前要求滑块验证，这一步只能在官方域名完成。点下面按钮去官网发码，收到短信后回来填验证码即可——换凭据和保存由闻曲自动完成。</p>
+        <button id="xy-open-official" class="brush-btn xy-open">去官网获取验证码 ↗</button>
+      </div>
+
+      <details class="xy-manual">
+        <summary>已经登录官网？手动粘贴 token</summary>
+        <textarea id="xy-token-input" class="cookie-input" rows="2" placeholder="粘贴 x-jike-access-token……（整段请求头也能识别）"></textarea>
+        <button id="xy-token-save" class="brush-btn">保存凭据</button>
+      </details>
+
       <div id="xy-token-status" class="qr-status">未查询登录态</div>
-      <p class="xy-note">token 有时效，过期后照上面三步重新取一次即可</p>
+      <p class="xy-note">凭据只存在本机，不会上传；过期后重新用验证码登录一次即可</p>
     </div>
 
     <button id="login-close" class="brush-btn">关闭</button>

@@ -10,7 +10,8 @@ const fs = require('fs');
 const http = require('http');
 const os = require('os');
 const path = require('path');
-const { BrowserWindow, app, session } = require('electron');
+// 原生 Electron（mac 端）优先；纯 Web 服务下由本机 Chrome 提供等价的隐藏窗口
+const { BrowserWindow, app, session } = require('./electron-runtime');
 const QRCode = require('qrcode');
 
 const API_BASE = 'https://api.qishui.com';

@@ -34,7 +34,11 @@ const crypto = require('crypto');
 /* ---------- 多平台模块 ---------- */
 const qishuiApi = require('./modules/qishui-api.js');
 const qqApi = require('./modules/qq-api.js');
+const qqQrLogin = require('./modules/qq-qr-login.js');
 const xyApi = require('./modules/xiaoyuzhou-api.js');
+const qishuiQrLogin = require('./modules/qishui-qr-login.js');
+const electronRuntime = require('./modules/electron-runtime');
+const QISHUI_QR_AVAILABLE = electronRuntime.isChromiumShim ? !!electronRuntime.findChrome() : true;
 const { TrackDecryptor } = require('./modules/qishui-audio-decryptor/track-decryptor');
 const qishuiAudioDecryptor = new TrackDecryptor();
 
@@ -402,7 +406,43 @@ const server = http.createServer(async (req, res) => {
     }
 
     // ==================== 汽水音乐 ====================
-    if (pn === '/api/qishui/status') return sendJSON(res, await qishuiApi.handleQishuiStatus(qishuiCookie));
+    if (pn === '/api/qishui/status') {
+      const st = await qishuiApi.handleQishuiStatus(qishuiCookie);
+      return sendJSON(res, Object.assign({}, st, {
+        qrAvailable: QISHUI_QR_AVAILABLE,
+        qrRuntime: electronRuntime.isChromiumShim ? 'chrome' : 'electron',
+        qrStatus: qishuiQrLogin.getStatus(),
+      }));
+    }
+    // 抖音 App 扫码：二维码由官方签名引擎生成，凭据落到本地后再同步给播放接口
+    if (pn === '/api/qishui/login/qrcode') {
+      try {
+        const r = await qishuiQrLogin.createQrCode();
+        const d = r.data || {};
+        return sendJSON(res, {
+          ok: true, provider: 'qishui', app: 'douyin',
+          token: d.token || '', qrcode: d.qrcode || '', scan_url: d.scan_url || '',
+          description: d.description || '',
+        });
+      } catch (e) {
+        return sendJSON(res, { ok: false, error: e.message, code: e.code || '', qrAvailable: QISHUI_QR_AVAILABLE }, 200);
+      }
+    }
+    if (pn === '/api/qishui/login/check') {
+      try {
+        const r = await qishuiQrLogin.checkQrConnect(q.get('token') || '');
+        const d = r.data || {};
+        if (d.confirmed) {
+          const cookie = qishuiQrLogin.getCookie();
+          if (cookie) saveQishuiCookie(cookie);
+        }
+        return sendJSON(res, {
+          ok: true, confirmed: !!d.confirmed,
+          status: String(d.status || ''), error_code: d.error_code,
+          description: d.description || '',
+        });
+      } catch (e) { return sendJSON(res, { ok: false, error: e.message }, 200); }
+    }
     if (pn === '/api/qishui/login/cookie') {
       const body = req.method === 'POST' ? await readBody(req) : {};
       const c = body.cookie || q.get('cookie') || '';
@@ -410,7 +450,11 @@ const server = http.createServer(async (req, res) => {
       saveQishuiCookie(qishuiApi.normalizeQishuiCookieInput(c) || c);
       return sendJSON(res, await qishuiApi.handleQishuiStatus(qishuiCookie));
     }
-    if (pn === '/api/qishui/logout') { saveQishuiCookie(''); return sendJSON(res, { ok: true }); }
+    if (pn === '/api/qishui/logout') {
+      qishuiQrLogin.clear().catch(() => {});
+      saveQishuiCookie('');
+      return sendJSON(res, { ok: true });
+    }
     if (pn === '/api/qishui/search') {
       const kw = q.get('keywords') || '';
       const limit = Math.min(50, parseInt(q.get('limit') || '20', 10) || 20);
@@ -430,15 +474,45 @@ const server = http.createServer(async (req, res) => {
     if (pn === '/api/qishui/lyric') return sendJSON(res, await qishuiApi.handleQishuiLyric(q.get('id') || '', qishuiCookie));
 
     // ==================== QQ 音乐 ====================
-    if (pn === '/api/qq/status') return sendJSON(res, Object.assign({ provider: 'qq' }, qqApi.qqLoginInfo()));
+    if (pn === '/api/qq/status') {
+      const cookie = qqApi.getQQCookie();
+      return sendJSON(res, Object.assign({ provider: 'qq' }, qqApi.qqLoginInfo(), {
+        channels: qqQrLogin.getChannels(),
+        authorization: qqQrLogin.assessPlaybackAuth(cookie),
+        playbackAuth: qqApi.qqPlaybackAuth(),
+      }));
+    }
+    if (pn === '/api/qq/qr/channels') return sendJSON(res, { ok: true, provider: 'qq', channels: qqQrLogin.getChannels() });
+    if (pn === '/api/qq/qr/create') {
+      const body = req.method === 'POST' ? await readBody(req) : {};
+      const channel = String(body.channel || q.get('channel') || 'qq');
+      try { return sendJSON(res, await qqQrLogin.createQr(channel)); }
+      catch (e) { return sendJSON(res, { ok: false, channel, error: e.message }, 200); }
+    }
+    if (pn === '/api/qq/qr/check') {
+      const channel = String(q.get('channel') || 'qq');
+      const id = String(q.get('id') || '');
+      try {
+        const r = await qqQrLogin.checkQr(channel, id);
+        if (r.confirmed && r.cookie) saveQQCookie(r.cookie);
+        return sendJSON(res, r);
+      } catch (e) { return sendJSON(res, { ok: false, status: 'error', error: e.message }, 200); }
+    }
+    if (pn === '/api/qq/playback/auth') return sendJSON(res, Object.assign({ ok: true, provider: 'qq' }, await qqQrLogin.probeVipStatus(qqApi.getQQCookie())));
     if (pn === '/api/qq/login/cookie') {
       const body = req.method === 'POST' ? await readBody(req) : {};
       const c = body.cookie || q.get('cookie') || '';
       if (!c) return sendJSON(res, { ok: false, error: 'missing cookie' }, 400);
       saveQQCookie(c);
-      return sendJSON(res, Object.assign({ provider: 'qq', ok: true }, qqApi.qqLoginInfo()));
+      return sendJSON(res, Object.assign({ provider: 'qq', ok: true }, qqApi.qqLoginInfo(), {
+        authorization: qqQrLogin.assessPlaybackAuth(qqApi.getQQCookie()),
+      }));
     }
-    if (pn === '/api/qq/logout') { saveQQCookie(''); return sendJSON(res, { ok: true }); }
+    if (pn === '/api/qq/logout') {
+      await qqQrLogin.clear();
+      saveQQCookie('');
+      return sendJSON(res, { ok: true });
+    }
     if (pn === '/api/qq/search') {
       const kw = q.get('keywords') || '';
       const limit = Math.min(50, parseInt(q.get('limit') || '20', 10) || 20);
@@ -452,6 +526,16 @@ const server = http.createServer(async (req, res) => {
 
     // ==================== 小宇宙播客 ====================
     if (pn === '/api/xy/status') return sendJSON(res, xyApi.handleXYStatus());
+    if (pn === '/api/xy/login/send-code') {
+      const body = req.method === 'POST' ? await readBody(req) : {};
+      try { return sendJSON(res, await xyApi.handleXYSendCode(body)); }
+      catch (e) { return sendJSON(res, { ok: false, message: e.message }, 200); }
+    }
+    if (pn === '/api/xy/login/sms') {
+      const body = req.method === 'POST' ? await readBody(req) : {};
+      try { return sendJSON(res, await xyApi.handleXYLoginSMS(body)); }
+      catch (e) { return sendJSON(res, { ok: false, message: e.message }, 200); }
+    }
     if (pn === '/api/xy/login/token') {
       const body = req.method === 'POST' ? await readBody(req) : {};
       try { return sendJSON(res, await xyApi.handleXYSetToken(body.token || q.get('token') || '')); }
