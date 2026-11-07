@@ -138,6 +138,146 @@ function drawAmbient(t) {
 }
 requestAnimationFrame(drawAmbient);
 
+/* ---------- 墨染场：封面取色 → 水墨晕染粒子 ---------- */
+const inkStage = $('stage');
+const inkCanvas = $('ink');
+const inkCtx = inkCanvas.getContext('2d');
+/* main/sub/glow 供墨晕画布忠实呈现封面色；acc/accGlow 供 UI 强调色，
+   始终以琥珀为底并保住明度，避免封面过暗时按钮、歌词、光圈一起发灰 */
+const INK_BASE = {
+  main: [230, 176, 106], sub: [143, 184, 174], glow: [242, 201, 138],
+  acc: [230, 176, 106], accGlow: [242, 201, 138],
+};
+const inkClone = (p) => Object.fromEntries(Object.entries(p).map(([k, v]) => [k, [...v]]));
+let inkCur = inkClone(INK_BASE);       // 当前色（逐帧缓动，换歌不跳色）
+let inkTarget = inkClone(INK_BASE);    // 封面目标色
+const inkCss = { glow: '242,201,138' };
+let inkBlobs = [], inkSpecks = [], inkFrame = 0;
+
+function resizeInk() {
+  const w = inkStage.clientWidth || innerWidth;
+  const h = inkStage.clientHeight || innerHeight;
+  // 低分辨率绘制 + CSS 模糊 = 柔和水墨边缘，同时省 GPU
+  inkCanvas.width = Math.max(1, Math.round(w * .38));
+  inkCanvas.height = Math.max(1, Math.round(h * .38));
+  inkBlobs = Array.from({ length: 14 }, (_, i) => ({
+    x: Math.random(), y: Math.random(),
+    r: .13 + Math.random() * .26,
+    vx: (Math.random() - .5) * .00018,
+    vy: -(0.00005 + Math.random() * .00013),
+    a: .10 + Math.random() * .16,
+    c: i % 4 === 0 ? 'sub' : 'main',
+    ph: Math.random() * 6.283,
+  }));
+  inkSpecks = Array.from({ length: 38 }, () => ({
+    x: Math.random(), y: Math.random(),
+    r: .0018 + Math.random() * .004,
+    vx: (Math.random() - .5) * .00022,
+    vy: -(0.0001 + Math.random() * .00028),
+    a: .12 + Math.random() * .32,
+    ph: Math.random() * 6.283,
+  }));
+}
+function ensureInkSize() {
+  if (inkStage.hidden) return;
+  const w = Math.max(1, Math.round((inkStage.clientWidth || innerWidth) * .38));
+  const h = Math.max(1, Math.round((inkStage.clientHeight || innerHeight) * .38));
+  if (inkCanvas.width !== w || inkCanvas.height !== h) resizeInk();
+}
+addEventListener('resize', ensureInkSize);
+
+function drawInk(t) {
+  requestAnimationFrame(drawInk);
+  if (!inkCanvas.width) resizeInk();
+  if (inkStage.hidden || document.hidden) return;
+  // 换歌时颜色缓动过渡
+  for (const k in inkCur) {
+    for (let i = 0; i < 3; i++) inkCur[k][i] += (inkTarget[k][i] - inkCur[k][i]) * .05;
+  }
+  if (++inkFrame % 4 === 0) {
+    inkStage.style.setProperty('--ink-rgb', inkCur.acc.map(v => Math.round(v)).join(','));
+    inkStage.style.setProperty('--ink-glow-rgb', inkCur.accGlow.map(v => Math.round(v)).join(','));
+    inkCss.glow = inkCur.accGlow.map(v => Math.round(v)).join(',');
+  }
+  const W = inkCanvas.width, H = inkCanvas.height;
+  const beat = state.playing ? (state.level || 0) : 0;
+  inkCtx.clearRect(0, 0, W, H);
+  inkCtx.globalCompositeOperation = 'screen';
+  // 大墨晕：缓慢上浮、正弦呼吸、随节拍舒张
+  for (const b of inkBlobs) {
+    b.x += b.vx; b.y += b.vy;
+    if (b.y < -.4) { b.y = 1.4; b.x = Math.random(); }
+    if (b.x < -.4) b.x = 1.4;
+    if (b.x > 1.4) b.x = -.4;
+    const breathe = 1 + Math.sin(t / 2700 + b.ph) * .13 + beat * .09;
+    const cx = b.x * W, cy = b.y * H, r = b.r * W * breathe;
+    const c = inkCur[b.c];
+    const rgb = `${c[0] | 0},${c[1] | 0},${c[2] | 0}`;
+    const alpha = b.a * (state.playing ? .9 + beat * .55 : .72);
+    const g = inkCtx.createRadialGradient(cx, cy, 0, cx, cy, r);
+    g.addColorStop(0, `rgba(${rgb},${alpha})`);
+    g.addColorStop(.42, `rgba(${rgb},${alpha * .4})`);
+    g.addColorStop(1, `rgba(${rgb},0)`);
+    inkCtx.fillStyle = g;
+    inkCtx.beginPath(); inkCtx.arc(cx, cy, r, 0, 6.2832); inkCtx.fill();
+  }
+  // 细墨点：浮尘般的微光
+  const gc = inkCur.accGlow, grgb = `${gc[0] | 0},${gc[1] | 0},${gc[2] | 0}`;
+  for (const s of inkSpecks) {
+    s.x += s.vx; s.y += s.vy;
+    if (s.y < -.02) { s.y = 1.02; s.x = Math.random(); }
+    const tw = .55 + Math.sin(t / 1500 + s.ph) * .45;
+    inkCtx.fillStyle = `rgba(${grgb},${s.a * tw})`;
+    inkCtx.beginPath();
+    inkCtx.arc(s.x * W, s.y * H, Math.max(.8, s.r * W * (1 + beat * .4)), 0, 6.2832);
+    inkCtx.fill();
+  }
+  inkCtx.globalCompositeOperation = 'source-over';
+}
+requestAnimationFrame(drawInk);
+
+/* 从封面代理图提取主色（同源，可读像素），混入琥珀以保持国风墨色基调 */
+function paintFromCover(src) {
+  if (!src) { inkTarget = inkClone(INK_BASE); return; }
+  const img = new Image();
+  img.onload = () => {
+    try {
+      const c = document.createElement('canvas');
+      c.width = c.height = 20;
+      const cx = c.getContext('2d', { willReadFrequently: true });
+      cx.drawImage(img, 0, 0, 20, 20);
+      const d = cx.getImageData(0, 0, 20, 20).data;
+      let rs = 0, gs = 0, bs = 0, n = 0, best = null, bestScore = -1;
+      for (let i = 0; i < d.length; i += 4) {
+        const r = d[i], g = d[i + 1], b = d[i + 2];
+        if (d[i + 3] < 40) continue;
+        const mx = Math.max(r, g, b), mn = Math.min(r, g, b);
+        const lum = r * .299 + g * .587 + b * .114;
+        if (lum < 20 || lum > 238) continue;
+        rs += r; gs += g; bs += b; n++;
+        const score = (mx - mn) * (1 - Math.abs(lum - 150) / 150);
+        if (score > bestScore) { bestScore = score; best = [r, g, b]; }
+      }
+      if (!n) return;
+      let main = [rs / n, gs / n, bs / n].map((v, i) => v * .6 + INK_BASE.main[i] * .4);
+      const lum = main[0] * .299 + main[1] * .587 + main[2] * .114;
+      if (lum > 178) main = main.map(v => v * 178 / lum);
+      else if (lum < 60) main = main.map(v => Math.min(255, v * 1.25));
+      const glow = main.map((v, i) => Math.min(255, v * .5 + INK_BASE.glow[i] * .5));
+      const sub = best
+        ? best.map((v, i) => v * .58 + INK_BASE.sub[i] * .42)
+        : [...INK_BASE.sub];
+      // UI 强调色：七成琥珀 + 三成封面，明度不足则整体提亮，保证按钮与歌词始终点睛
+      let acc = main.map((v, i) => v * .3 + INK_BASE.main[i] * .7);
+      const alum = acc[0] * .299 + acc[1] * .587 + acc[2] * .114;
+      if (alum < 175) acc = acc.map(v => Math.min(255, v * 175 / alum));
+      const accGlow = acc.map((v, i) => Math.min(255, v * .45 + INK_BASE.glow[i] * .55));
+      inkTarget = { main, sub, glow, acc, accGlow };
+    } catch (e) { /* 图片不可读时保持当前色 */ }
+  };
+  img.src = src;
+}
+
 /* ---------- 频谱可视化（Web Audio，复刻原版 02-visual/03-beat） ---------- */
 let audioCtx = null, analyser = null, freqData = null;
 function ensureAudioGraph() {
@@ -172,8 +312,8 @@ function drawSpectrum() {
     sum += v;
     const h = Math.max(2, v * spCanvas.height * .9);
     const grad = spCtx.createLinearGradient(0, spCanvas.height, 0, spCanvas.height - h);
-    grad.addColorStop(0, 'rgba(230,176,106,.15)');
-    grad.addColorStop(1, `rgba(230,176,106,${.25 + v * .6})`);
+    grad.addColorStop(0, `rgba(${inkCss.glow},.15)`);
+    grad.addColorStop(1, `rgba(${inkCss.glow},${.25 + v * .6})`);
     spCtx.fillStyle = grad;
     spCtx.fillRect(i * w + w * .18, spCanvas.height - h, w * .64, h);
   }
@@ -255,9 +395,10 @@ async function loadDiscover() {
     if (daily.length) {
       $('daily-rail-section').hidden = false;
       const rail = $('daily-rail'); rail.innerHTML = '';
-      daily.slice(0, 20).forEach(s => {
+      daily.slice(0, 20).forEach((s, i) => {
         const el = document.createElement('div');
         el.className = 'rail-card';
+        el.style.setProperty('--i', String(Math.min(i, 12)));
         el.innerHTML = `<img src="${coverUrl(s.cover)}" loading="lazy" alt=""><div class="rc-name">${escapeHtml(s.name)}</div><div class="rc-sub">${escapeHtml(s.artist)}</div>`;
         el.onclick = () => { state.queue = daily.slice(); renderQueue(); playIndex(daily.indexOf(s)); };
         rail.appendChild(el);
@@ -267,9 +408,10 @@ async function loadDiscover() {
     if (pls.length) {
       $('pl-grid-section').hidden = false;
       const grid = $('pl-grid'); grid.innerHTML = '';
-      pls.slice(0, 6).forEach(p => {
+      pls.slice(0, 6).forEach((p, i) => {
         const el = document.createElement('div');
         el.className = 'pl-cell';
+        el.style.setProperty('--i', String(i));
         el.innerHTML = `<img src="${coverUrl(p.cover)}" loading="lazy" alt=""><div class="pc-name">${escapeHtml(p.name)}</div><div class="pc-sub">${escapeHtml(p.tag || '')} · ${p.trackCount || 0}首</div>`;
         el.onclick = () => openPlaylist(p.id);
         grid.appendChild(el);
@@ -478,6 +620,7 @@ async function playIndex(i) {
   $('mini-cover').src = cv || 'icon.svg';
   $('stage-cover').src = cv || 'icon.svg';
   $('stage-bg').style.backgroundImage = cv ? `url(${cv})` : 'none';
+  paintFromCover(cv || '');
   $('fee-badge').hidden = s.fee !== 1;
   $('quality-badge').hidden = true;
   loadLyrics(s);
@@ -582,6 +725,11 @@ function restoreState() {
       $('mini-artist').textContent = cur.artist + ' · 继续听';
       const cv = coverUrl(cur.cover);
       $('mini-cover').src = cv || 'icon.svg';
+      $('stage-cover').src = cv || 'icon.svg';
+      $('stage-bg').style.backgroundImage = cv ? `url(${cv})` : 'none';
+      $('stage-name').textContent = cur.name;
+      $('stage-artist').textContent = cur.artist;
+      paintFromCover(cv || '');
       $('mini-toggle').addEventListener('click', () => playIndex(state.index), { once: true });
       $('recent-sub').textContent = cur.name;
       updateContinueCard();
@@ -665,7 +813,10 @@ $('like-btn').addEventListener('click', toggleLike);
 $('mini-like').addEventListener('click', (e) => { e.stopPropagation(); toggleLike(); });
 
 /* ---------- 播放页开关 ---------- */
-function openStage() { $('stage').hidden = false; requestAnimationFrame(() => $('stage').classList.add('show')); }
+function openStage() {
+  $('stage').hidden = false;
+  requestAnimationFrame(() => { $('stage').classList.add('show'); ensureInkSize(); });
+}
 function closeStage() { $('stage').classList.remove('show'); setTimeout(() => { $('stage').hidden = true; }, 420); }
 $('mini-expand').addEventListener('click', (e) => { e.stopPropagation(); openStage(); });
 $('bar-lyric').addEventListener('click', (e) => { e.stopPropagation(); openStage(); });

@@ -1,5 +1,5 @@
-const CACHE = 'earworm-v2';
-const SHELL = ['./index.html', './index.html', './app.css', './app.js', './icon.svg'];
+const CACHE = 'earworm-v3';
+const SHELL = ['./', './index.html', './app.css', './app.js', './icon.svg', './manifest.webmanifest'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)));
@@ -11,15 +11,20 @@ self.addEventListener('activate', (e) => {
   ));
   self.clients.claim();
 });
+/* 静态资源走网络优先：改版即时生效；断网时回退缓存，接口与音频代理一律不缓存 */
 self.addEventListener('fetch', (e) => {
-  const url = new URL(e.request.url);
-  if (url.pathname.startsWith('./index.html') && e.request.method === 'GET') {
-    e.respondWith(
-      fetch(e.request).then(res => {
+  const req = e.request;
+  if (req.method !== 'GET') return;
+  const url = new URL(req.url);
+  if (url.origin !== self.location.origin) return;
+  if (url.pathname.startsWith('/api/')) return;
+  e.respondWith(
+    fetch(req).then(res => {
+      if (res && res.status === 200 && res.type === 'basic') {
         const copy = res.clone();
-        caches.open(CACHE).then(c => c.put(e.request, copy));
-        return res;
-      }).catch(() => caches.match(e.request).then(m => m || caches.match('./index.html')))
-    );
-  }
+        caches.open(CACHE).then(c => c.put(req, copy));
+      }
+      return res;
+    }).catch(() => caches.match(req).then(m => m || caches.match('./index.html')))
+  );
 });
