@@ -1,5 +1,10 @@
 node_modules/
 .cookie
+.qishui-cookie
+.qq-cookie
+.xy-token.json
+.qishui-token
+modules/.qishui-token
 .workbuddy/
 dist/
 .DS_Store
