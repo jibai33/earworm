@@ -268,8 +268,22 @@ const server = http.createServer(async (req, res) => {
     if (pn === '/api/song/url') {
       const id = q.get('id');
       const quality = q.get('quality') || '';
-      const r = await song_url_v1({ id, level: quality || 'exhigh', cookie: userCookie, timestamp: Date.now() });
-      const d = (r.body.data || [])[0] || {};
+      const tryLevels = [quality || 'exhigh'];
+      if (quality && quality !== 'standard') tryLevels.push('standard');
+      let d = null, lastErr = null;
+      for (const level of tryLevels) {
+        try {
+          const r = await song_url_v1({ id, level, cookie: userCookie, timestamp: Date.now() });
+          d = (r.body.data || [])[0] || null;
+          if (d && d.url) break;
+        } catch (e) { lastErr = e; /* 降级重试 */ }
+      }
+      if (!d) {
+        return sendJSON(res, {
+          provider: 'netease', source: 'netease', url: null,
+          error: '取不到播放地址（' + ((lastErr && lastErr.message) || 'VIP 或版权限制') + '）',
+        });
+      }
       return sendJSON(res, {
         provider: 'netease', source: 'netease',
         url: d.url || null, level: d.level || '', br: d.br || 0, type: d.type || '',
@@ -365,12 +379,11 @@ const server = http.createServer(async (req, res) => {
     if (pn === '/api/discover/home') {
       const info = await getLoginInfo();
       let daily = [];
-      if (info.loggedIn) {
-        try {
-          const r = await recommend_songs({ cookie: userCookie, timestamp: Date.now() });
-          daily = ((r.body.data && r.body.data.dailySongs) || []).map(mapSongRecord);
-        } catch { /* 降级 */ }
-      }
+      // 每日推荐：登录与否都先试（实测未登录也可返回）
+      try {
+        const r = await recommend_songs({ cookie: userCookie, timestamp: Date.now() });
+        daily = ((r.body.data && r.body.data.dailySongs) || []).map(mapSongRecord);
+      } catch { /* 降级 */ }
       if (!daily.length) {
         try {
           const r = await personalized_newsong({ limit: 30, cookie: userCookie, timestamp: Date.now() });
