@@ -1,0 +1,211 @@
+/* ═══════════════════════════════════════════════
+   闻曲 · 今日一卦 ｜ 便签签条 + 太极起卦面板
+   墨色 × 琥珀 × 朱砂，与 app.css 同一套令牌
+   ═══════════════════════════════════════════════ */
+
+/* ── 侧栏便签上的一条签 ── */
+.gua-sticker {
+  position: relative; z-index: 1;
+  display: flex; align-items: center; gap: 12px; width: 100%;
+  padding: 11px 13px; margin: 0 0 20px;
+  text-align: left; color: var(--txt); cursor: pointer;
+  border: 1px solid rgba(var(--amber-rgb), .22); border-radius: var(--r-sm);
+  background: linear-gradient(135deg, rgba(192,57,43,.11), rgba(230,176,106,.045));
+  transition: border-color .22s, transform .22s, box-shadow .22s;
+}
+.gua-sticker:hover {
+  border-color: rgba(var(--amber-rgb), .5); transform: translateY(-2px);
+  box-shadow: 0 10px 26px rgba(0,0,0,.3);
+}
+.gua-sticker::after {
+  content: '卦'; position: absolute; right: -4px; bottom: -20px;
+  font-family: var(--serif); font-size: 76px; line-height: 1;
+  color: rgba(var(--amber-rgb), .055); pointer-events: none;
+}
+.gs-taiji {
+  position: relative; flex: none; width: 26px; height: 26px; border-radius: 50%;
+  background: linear-gradient(90deg, var(--amber) 50%, var(--ink-1) 50%);
+  animation: guaSpin 16s linear infinite;
+  box-shadow: 0 0 0 1px rgba(var(--amber-rgb), .3), 0 0 14px rgba(var(--amber-rgb), .15);
+}
+.gs-taiji::before, .gs-taiji::after {
+  content: ''; position: absolute; left: 25%; width: 50%; height: 50%; border-radius: 50%;
+}
+.gs-taiji::before { top: 0; background: var(--amber); }
+.gs-taiji::after { bottom: 0; background: var(--ink-1); }
+.gs-text { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.gs-kicker { font-size: 10px; letter-spacing: .16em; color: var(--txt-dim); }
+.gs-name {
+  font-family: var(--serif); font-size: 13px; letter-spacing: .06em; color: var(--amber-2);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.gs-go { margin-left: auto; flex: none; font-size: 11px; color: var(--txt-dim); letter-spacing: .08em; }
+.gua-sticker:hover .gs-go { color: var(--amber); }
+
+/* ── 起卦面板 ── */
+.gua-modal {
+  position: fixed; inset: 0; z-index: 85; padding: 24px;
+  display: grid; place-items: center;
+  background: rgba(8,10,13,.82);
+  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+  opacity: 0; transition: opacity .24s ease;
+}
+.gua-modal.show { opacity: 1; }
+.gua-card {
+  position: relative; width: min(92vw, 620px); max-height: 88dvh; overflow-y: auto;
+  padding: 26px 28px 22px;
+  background: var(--glass-strong); backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
+  border: 1px solid var(--line-2); border-radius: var(--r-lg); box-shadow: var(--shadow-pop);
+  transform: translateY(12px) scale(.985); transition: transform .32s cubic-bezier(.2,.8,.3,1);
+}
+.gua-modal.show .gua-card { transform: none; }
+.gua-close {
+  position: absolute; right: 16px; top: 14px; width: 30px; height: 30px;
+  background: none; border: none; color: var(--txt-dim); font-size: 15px; cursor: pointer;
+  border-radius: 50%; transition: color .18s, background .18s;
+}
+.gua-close:hover { color: var(--txt); background: rgba(255,255,255,.07); }
+
+.gua-head { display: flex; align-items: center; gap: 14px; margin-bottom: 18px; }
+.gua-seal {
+  flex: none; width: 40px; height: 40px; display: grid; place-items: center;
+  font-family: var(--serif); font-size: 22px; color: #f5e9d5;
+  background: var(--cinnabar); border-radius: 5px;
+  box-shadow: 0 4px 18px rgba(192,57,43,.32), inset 0 0 0 2px rgba(255,255,255,.14);
+}
+.gh-title h2 { font-family: var(--serif); font-size: 18px; letter-spacing: .14em; }
+.gh-title p { font-size: 10px; letter-spacing: .16em; color: var(--txt-dim); margin-top: 5px; }
+
+/* ── 太极 + 先天八卦环 ── */
+.gua-stage { display: flex; align-items: center; gap: 30px; }
+.gua-wheel { position: relative; flex: none; width: 190px; height: 190px; }
+.gua-ring { position: absolute; inset: 0; }
+.gua-ring::after {
+  content: ''; position: absolute; inset: 34px; border-radius: 50%;
+  border: 1px dashed rgba(var(--amber-rgb), .16); pointer-events: none;
+}
+.ring-gua {
+  position: absolute; left: 50%; top: 50%; width: 28px; height: 28px; margin: -14px 0 0 -14px;
+  display: grid; place-items: center; font-size: 17px; line-height: 1;
+  color: rgba(233,228,216,.46); border: 1px solid transparent; border-radius: 50%;
+  transition: color .4s, border-color .4s, background .4s, text-shadow .4s;
+}
+.ring-gua.on {
+  color: var(--amber-2); border-color: rgba(var(--amber-rgb), .55);
+  background: rgba(var(--amber-rgb), .1);
+  text-shadow: 0 0 16px rgba(var(--amber-rgb), .8);
+}
+.taiji {
+  position: absolute; left: 50%; top: 50%; width: 104px; height: 104px; margin: -52px 0 0 -52px;
+  animation: guaSpin 48s linear infinite;
+  filter: drop-shadow(0 0 22px rgba(230,176,106,.16));
+}
+.gua-modal.casting .taiji { animation-duration: 3s; }
+@keyframes guaSpin { to { transform: rotate(360deg); } }
+
+/* ── 六爻：从上爻到初爻，动画时自下而上落定 ── */
+.gua-hex { flex: 1; min-width: 0; }
+.gh-label { font-size: 10px; letter-spacing: .16em; color: var(--txt-dim); margin-bottom: 14px; }
+.gh-lines { display: flex; flex-direction: column; gap: 11px; }
+.yao {
+  display: flex; align-items: center; gap: 10px; height: 12px;
+  opacity: 0; transform: translateY(-9px);
+  transition: opacity .34s ease, transform .34s cubic-bezier(.2,.8,.3,1);
+}
+.yao.settled { opacity: 1; transform: none; }
+.y-bars { display: flex; gap: 12px; flex: none; width: 128px; }
+.y-bar {
+  display: block; height: 7px; flex: 1; border-radius: 2px;
+  background: linear-gradient(90deg, rgba(233,228,216,.72), rgba(233,228,216,.95));
+  box-shadow: 0 0 12px rgba(var(--amber-rgb), .2);
+}
+.yao.yang .y-bar:nth-child(2) { display: none; }
+.yao.moving .y-bar { background: linear-gradient(90deg, var(--amber), var(--amber-2)); }
+.y-mark { width: 14px; flex: none; font-size: 13px; color: var(--cinnabar); line-height: 1; text-align: center; }
+.y-name { font-size: 10px; color: var(--txt-dim); letter-spacing: .1em; white-space: nowrap; }
+.gh-meta { font-size: 11px; color: var(--amber); opacity: .8; margin-top: 14px; line-height: 1.7; }
+
+/* ── 三枚铜钱 ── */
+.gua-coins { display: flex; align-items: center; gap: 10px; margin-top: 16px; perspective: 320px; }
+.coin {
+  position: relative; flex: none; width: 24px; height: 24px; border-radius: 50%;
+  background: radial-gradient(circle at 32% 26%, #f2c98a, #b4803d 68%, #6f4b21);
+  box-shadow: inset 0 0 0 1px rgba(0,0,0,.35), 0 2px 7px rgba(0,0,0,.45);
+}
+.coin::before { content: ''; position: absolute; inset: 8px; background: var(--ink-1); border-radius: 2px; }
+.coin::after {
+  content: attr(data-label); position: absolute; left: 50%; top: -16px; transform: translateX(-50%);
+  font-size: 10px; color: rgba(var(--amber-rgb), .8); white-space: nowrap;
+}
+.coin.flip { animation: coinFlip .44s cubic-bezier(.25,.7,.3,1); }
+@keyframes coinFlip {
+  0% { transform: rotateY(0) translateY(0); }
+  45% { transform: rotateY(540deg) translateY(-10px); }
+  100% { transform: rotateY(720deg) translateY(0); }
+}
+.coins-note { font-size: 10px; color: var(--txt-dim); margin-left: 4px; letter-spacing: .06em; }
+
+/* ── 卦意 ── */
+.gua-result {
+  position: relative;
+  display: flex; gap: 18px; margin-top: 22px; padding-top: 20px;
+  border-top: 1px solid var(--line-2);
+  opacity: 0; transform: translateY(10px); transition: opacity .5s ease, transform .5s ease;
+}
+.gua-result.shown { opacity: 1; transform: none; }
+/* 逐爻落定期间不留大片空白：结果区占位不动，只换一行淡墨提示 */
+.gua-modal.casting .gua-result { opacity: 1; transform: none; }
+.gua-modal.casting .gua-result > * { opacity: 0; }
+.gua-modal.casting .gua-result::after {
+  content: '六爻未备 · 卦象待成'; position: absolute; inset: 0;
+  display: grid; place-items: center; font-family: var(--serif);
+  font-size: 13px; letter-spacing: .24em; color: var(--txt-dim); opacity: .6;
+}
+.gr-seal {
+  flex: none; width: 58px; height: 58px; display: grid; place-items: center;
+  font-family: var(--serif); font-size: 18px; letter-spacing: .02em; line-height: 1.15;
+  color: #f5e9d5; background: var(--cinnabar); border-radius: 5px;
+  text-align: center; padding: 4px;
+  box-shadow: 0 6px 22px rgba(192,57,43,.3), inset 0 0 0 2px rgba(255,255,255,.13);
+}
+.gr-body { min-width: 0; }
+.gr-name { font-family: var(--serif); font-size: 17px; letter-spacing: .08em; color: var(--amber-2); }
+.gr-sub { font-size: 11px; color: var(--txt-dim); margin-top: 6px; line-height: 1.7; }
+.gr-read { font-family: var(--serif); font-size: 13px; line-height: 1.95; letter-spacing: .04em; margin-top: 10px; opacity: .9; }
+.gr-yiji { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+.gr-yiji span {
+  font-size: 11px; padding: 4px 11px; border-radius: 999px;
+  border: 1px solid var(--line-2); color: var(--txt-dim);
+}
+#gr-yi { color: var(--celadon); border-color: rgba(143,184,174,.35); }
+#gr-ji { color: #d99a92; border-color: rgba(192,57,43,.38); }
+
+/* ── 面板底部 ── */
+.gua-foot { margin-top: 20px; display: flex; flex-direction: column; align-items: center; gap: 12px; }
+.gf-note { font-size: 10px; color: var(--txt-dim); opacity: .7; letter-spacing: .08em; text-align: center; }
+.gf-acts { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+.gf-acts .chip-btn { font-size: 12px; }
+
+/* ── 窄屏 ── */
+@media (max-width: 640px) {
+  .gua-card { padding: 22px 18px 18px; }
+  .gua-stage { flex-direction: column; gap: 14px; }
+  .gua-wheel { width: 176px; height: 176px; }
+  .gua-hex { width: 100%; }
+  .y-bars { width: min(46vw, 128px); }
+  .gua-result { gap: 12px; }
+  .gr-seal { width: 50px; height: 50px; font-size: 16px; }
+  /* 窄屏内容要滚动，操作区固定在底部，避免「只看得到卦、找不到按钮」 */
+  .gua-foot {
+    position: sticky; bottom: 0; z-index: 2; margin-top: 12px; padding: 12px 0 4px;
+    background: linear-gradient(to top, #12151a 0, #12151a 84%, rgba(18,21,26,0) 100%);
+  }
+}
+
+/* ── 减少动态偏好：只留结果，不转不翻不逐爻 ── */
+@media (prefers-reduced-motion: reduce) {
+  .gua-sticker, .gua-card, .gua-modal, .yao, .gua-result, .ring-gua { transition: none !important; }
+  .gs-taiji, .taiji, .coin.flip { animation: none !important; }
+  .yao { opacity: 1; transform: none; }
+  .gua-result { opacity: 1; transform: none; }
+}
