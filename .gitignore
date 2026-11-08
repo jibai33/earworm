@@ -1,15 +1,21 @@
+# ---- 依赖与构建产物 ----
 node_modules/
+dist/
+.DS_Store
+*.log
+
+# ---- 本机运行期凭据（勿提交）----
 .cookie
 .qishui-cookie
 .qq-cookie
-.xy-token.json
 .qishui-token
-modules/.qishui-token
-modules/.qishui-qr-login.json
+.qishui-oauth.json
+.qishui-qr-login.json
+.xy-token.json
 data/
-.workbuddy/
-dist/
-.DS_Store
 
-# macOS 桌面版独立仓库（https://github.com/jibai33/earworm_mac）
+# ---- 内部工作目录 ----
+.workbuddy/
+
+# ---- macOS 桌面端：独立仓库（https://github.com/jibai33/earworm_mac）----
 version_mac/
