@@ -26,7 +26,10 @@
   --serif: "Noto Serif SC", "Source Han Serif SC", "STSong", serif;
   --sans: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
   --topbar-h: 64px;
+  --boot-offset: 0s;
 }
+/* 有开机画面时，首页入场动效整体顺延，让「揭开」的瞬间卡片才开始浮现 */
+html.booting { --boot-offset: 1.08s; }
 * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
 html, body { height: 100%; }
 body { background: var(--ink-0); color: var(--txt); font-family: var(--sans); overflow: hidden; user-select: none; }
@@ -670,7 +673,7 @@ body::before {
 
 .b-card {
   animation: cardIn .66s cubic-bezier(.2,.8,.3,1) backwards;
-  animation-delay: calc(var(--i, 0) * 78ms + 100ms);
+  animation-delay: calc(var(--boot-offset) + var(--i, 0) * 78ms + 100ms);
 }
 /* 一次性的斜向墨光，只在入场时扫过一遍 */
 .b-card::after {
@@ -679,7 +682,7 @@ body::before {
   background: linear-gradient(100deg, transparent, rgba(var(--amber-rgb), .085), transparent);
   transform: translateX(-170%);
   animation: sheen 1.05s cubic-bezier(.3,.6,.3,1) backwards;
-  animation-delay: calc(var(--i, 0) * 78ms + 320ms);
+  animation-delay: calc(var(--boot-offset) + var(--i, 0) * 78ms + 320ms);
 }
 /* 印章字随 hover 轻微浮起 */
 .bc-glyph { transition: transform .35s ease, color .35s ease; }
@@ -688,10 +691,10 @@ body::before {
 
 /* 左侧面板内容渐显 */
 .side-panel > * { position: relative; z-index: 1; animation: fadeUp .62s cubic-bezier(.2,.8,.3,1) backwards; }
-.side-panel > :nth-child(1) { animation-delay: 70ms; }
-.side-panel > :nth-child(2) { animation-delay: 150ms; }
-.side-panel > :nth-child(3) { animation-delay: 230ms; }
-.side-panel > :nth-child(4) { animation-delay: 310ms; }
+.side-panel > :nth-child(1) { animation-delay: calc(var(--boot-offset) + 70ms); }
+.side-panel > :nth-child(2) { animation-delay: calc(var(--boot-offset) + 150ms); }
+.side-panel > :nth-child(3) { animation-delay: calc(var(--boot-offset) + 230ms); }
+.side-panel > :nth-child(4) { animation-delay: calc(var(--boot-offset) + 310ms); }
 
 /* 异步生成的推荐卡 / 歌单卡跟随节奏 */
 .rail-card, .pl-cell {
@@ -839,6 +842,7 @@ body.is-scrolled .topbar {
 
 /* ═══ 减少动态效果：尊重系统无障碍设置 ═══ */
 @media (prefers-reduced-motion: reduce) {
+  html.booting { --boot-offset: 0s; }
   .b-card, .b-card::after, .side-panel > *, .rail-card, .pl-cell,
   .stage.show .stage-head, .stage.show .cover-wrap, .stage.show .lyrics,
   .stage.show .controls, .stage.show .stage-side, .orb-play:not(.sm),

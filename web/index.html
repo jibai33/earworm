@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh-CN" class="booting">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
@@ -8,9 +8,146 @@
 <link rel="manifest" href="./manifest.webmanifest">
 <link rel="icon" href="./icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="./icon.svg">
+<!-- 开机画面的关键样式内联：外链 CSS 到达之前就能画出墨底与印章，避免白屏闪一下 -->
+<style id="boot-critical">
+  html, body { background: #0b0d10; }
+  #boot {
+    position: fixed; inset: 0; z-index: 9999; overflow: hidden; isolation: isolate;
+    display: flex; align-items: center; justify-content: center;
+    background: #0b0d10;
+    animation: bootExit .30s ease 1.28s forwards;
+  }
+  #boot::before {
+    content: ''; position: absolute; inset: 0; pointer-events: none; opacity: .5;
+    background-image: radial-gradient(rgba(255,255,255,.022) 1px, transparent 1px);
+    background-size: 5px 5px;
+  }
+  .boot-wash { position: absolute; inset: -20%; pointer-events: none; }
+  .boot-wash.w1 {
+    background: radial-gradient(circle at 50% 46%, rgba(230,176,106,.24), rgba(230,176,106,.07) 34%, transparent 66%);
+    animation: bootInkBloom 1.6s ease-out both;
+  }
+  /* 与首页侧栏同源的巨型「聞」水印：给留白一层墨底，揭开后视觉不断裂 */
+  .boot-watermark {
+    position: absolute; z-index: 1; left: 50%; top: 50%;
+    transform: translate(-50%, -48%); pointer-events: none;
+    font-family: "Noto Serif SC", "Source Han Serif SC", "STSong", serif;
+    font-size: min(46vw, 420px); line-height: 1; color: rgba(233,228,216,.055);
+    animation: bootWatermark 1.5s ease-out both;
+  }
+  .boot-wash.w2 {
+    background: radial-gradient(circle at 62% 62%, rgba(143,184,174,.13), transparent 60%);
+    animation: bootDrift 1.5s ease-out both;
+  }
+  .boot-blots { position: absolute; inset: 0; pointer-events: none; }
+  .boot-blots i { position: absolute; display: block; border-radius: 50%; opacity: 0; }
+  .boot-blots i:nth-child(1) { width: 240px; height: 240px; left: 32%; top: 26%;
+    background: radial-gradient(circle, rgba(230,176,106,.20), transparent 70%); animation: bootBlot 1.45s ease-out .05s both; }
+  .boot-blots i:nth-child(2) { width: 180px; height: 180px; left: 56%; top: 52%;
+    background: radial-gradient(circle, rgba(143,184,174,.17), transparent 70%); animation: bootBlot 1.50s ease-out .22s both; }
+  .boot-blots i:nth-child(3) { width: 150px; height: 150px; left: 24%; top: 60%;
+    background: radial-gradient(circle, rgba(192,57,43,.13), transparent 70%); animation: bootBlot 1.35s ease-out .34s both; }
+  .boot-inner { position: relative; z-index: 2; display: flex; flex-direction: column; align-items: center; text-align: center; }
+  .boot-seal {
+    position: relative; width: 100px; height: 100px; border-radius: 11px;
+    display: flex; align-items: center; justify-content: center;
+    font-family: "Noto Serif SC", "Source Han Serif SC", "STSong", serif;
+    font-size: 60px; line-height: 1; color: #f7ecda;
+    background: linear-gradient(155deg, #d2493a, #b33126);
+    box-shadow: 0 12px 40px rgba(192,57,43,.42), inset 0 1px 0 rgba(255,255,255,.24), inset 0 0 0 1px rgba(255,255,255,.08);
+    animation: bootSealDrop .62s cubic-bezier(.16,1.12,.3,1) .06s both;
+  }
+  .boot-seal::after {
+    content: ''; position: absolute; inset: -14px; border-radius: 50%;
+    border: 1px solid rgba(230,176,106,.32); pointer-events: none;
+    animation: bootRipple .86s ease-out .30s both;
+  }
+  .boot-rule {
+    width: 200px; height: 1px; margin-top: 26px;
+    background: linear-gradient(90deg, transparent, rgba(230,176,106,.85), transparent);
+    animation: bootRuleGrow .46s cubic-bezier(.2,.8,.3,1) .44s both;
+  }
+  .boot-poem {
+    margin-top: 20px; white-space: nowrap;
+    font-family: "Noto Serif SC", "Source Han Serif SC", "STSong", serif;
+    font-size: 18px; letter-spacing: .16em; color: #e9e4d8;
+    animation: bootPoemRise .52s ease-out .58s both;
+  }
+  .boot-brand {
+    margin-top: 14px; font-size: 10px; letter-spacing: .32em; color: rgba(230,176,106,.62);
+    animation: bootBrandIn .44s ease-out .74s both;
+  }
+  .boot-skip {
+    position: absolute; z-index: 3; top: max(18px, env(safe-area-inset-top)); right: 22px;
+    background: transparent; border: 1px solid rgba(255,255,255,.14); border-radius: 999px;
+    color: rgba(233,228,216,.5); font-size: 11px; letter-spacing: .1em;
+    padding: 7px 14px; cursor: pointer; opacity: 0;
+    animation: bootFadeIn .40s ease .30s forwards;
+    transition: color .18s, border-color .18s, background .18s;
+  }
+  .boot-skip:hover, .boot-skip:focus-visible {
+    color: #e9e4d8; border-color: rgba(230,176,106,.6); background: rgba(230,176,106,.08); outline: none;
+  }
+  .boot-progress {
+    position: absolute; bottom: max(34px, env(safe-area-inset-bottom)); left: 50%;
+    transform: translateX(-50%); width: 120px; height: 1px;
+    background: rgba(255,255,255,.10); overflow: hidden;
+  }
+  .boot-progress i {
+    display: block; height: 100%; width: 100%; transform-origin: left center;
+    background: linear-gradient(90deg, rgba(230,176,106,.35), #e6b06a);
+    animation: bootProgress 1.28s linear both;
+  }
+  /* 跳过：覆盖掉 bootExit 的 1.28s 延时，立刻收场 */
+  #boot.is-skipped { animation: bootSkip .16s ease forwards !important; }
+  #boot.is-done { opacity: 0 !important; visibility: hidden !important; pointer-events: none !important; }
+  @keyframes bootExit { to { opacity: 0; visibility: hidden; pointer-events: none; transform: scale(1.02); } }
+  @keyframes bootSkip { to { opacity: 0; visibility: hidden; pointer-events: none; } }
+  @keyframes bootInkBloom { from { opacity: 0; transform: scale(.72); } 55% { opacity: 1; } to { opacity: .85; transform: scale(1.06); } }
+  @keyframes bootDrift { from { opacity: 0; transform: translate3d(-4%,3%,0) scale(.9); } to { opacity: 1; transform: none; } }
+  @keyframes bootBlot { 0% { opacity: 0; transform: scale(.4); } 45% { opacity: 1; } 100% { opacity: 0; transform: scale(1.5); } }
+  @keyframes bootSealDrop {
+    from { opacity: 0; transform: rotate(-2deg) scale(1.24); filter: blur(9px); }
+    60%  { opacity: 1; }
+    to   { opacity: 1; transform: rotate(-2deg) scale(1); filter: blur(0); }
+  }
+  @keyframes bootWatermark { from { opacity: 0; transform: translate(-50%,-48%) scale(.9); } to { opacity: 1; transform: translate(-50%,-48%) scale(1); } }
+  @keyframes bootRipple { from { opacity: .6; transform: scale(.82); } to { opacity: 0; transform: scale(1.9); } }
+  @keyframes bootRuleGrow { from { opacity: 0; transform: scaleX(0); } to { opacity: 1; transform: scaleX(1); } }
+  @keyframes bootPoemRise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+  @keyframes bootBrandIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: none; } }
+  @keyframes bootFadeIn { to { opacity: 1; } }
+  @keyframes bootProgress { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+  @media (max-width: 600px) {
+    .boot-seal { width: 84px; height: 84px; font-size: 50px; }
+    .boot-rule { width: 150px; margin-top: 22px; }
+    .boot-poem { font-size: 15px; letter-spacing: .1em; white-space: normal; max-width: 86vw; line-height: 1.9; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    #boot { display: none !important; }
+  }
+</style>
 <link rel="stylesheet" href="./app.css">
 </head>
 <body>
+<!-- ══ 开机动画：国风墨染 · 印章浮现 ══
+     纯 CSS 自动播完并退场（JS 失效也不会挡住首页），boot.js 只负责跳过、诗词与收尾清理 -->
+<div id="boot" role="status" aria-label="闻曲 · 正在展开曲卷">
+  <div class="boot-wash w1" aria-hidden="true"></div>
+  <div class="boot-wash w2" aria-hidden="true"></div>
+  <div class="boot-blots" aria-hidden="true"><i></i><i></i><i></i></div>
+  <div class="boot-watermark" aria-hidden="true">聞</div>
+  <div class="boot-inner" aria-hidden="true">
+    <div class="boot-seal">聞</div>
+    <div class="boot-rule"></div>
+    <div class="boot-poem" id="boot-poem">此曲只应天上有，人间能得几回闻。</div>
+    <div class="boot-brand">EARWORM · 听曲知雅意</div>
+  </div>
+  <button id="boot-skip" class="boot-skip" type="button" aria-label="跳过开场动画">跳过 ›</button>
+  <div class="boot-progress" aria-hidden="true"><i></i></div>
+</div>
+<script src="./boot.js"></script>
+
 <canvas id="ambient" aria-hidden="true"></canvas>
 
 <!-- ══ 顶栏（全局）：品牌 + 悬浮搜索 + 用户 ══ -->
