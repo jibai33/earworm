@@ -439,15 +439,27 @@ body::before {
 .cover-wrap { display: grid; place-items: center; position: relative; }
 .cover-ring {
   position: absolute; width: min(30vw, 300px); aspect-ratio: 1; border-radius: 50%;
-  border: 1px dashed rgba(var(--ink-rgb), .38);
-  box-shadow: 0 0 42px rgba(var(--ink-rgb), .1);
+  border: 1px dashed rgba(var(--ink-rgb), calc(.28 + var(--beat, 0) * .45));
+  box-shadow: 0 0 calc(30px + var(--beat, 0) * 64px) rgba(var(--ink-rgb), calc(.08 + var(--beat, 0) * .28));
   animation: spin 42s linear infinite;
   transition: border-color .9s ease, box-shadow .9s ease;
 }
+/* 外圈第二环：随节拍呼吸的墨纹，与虚线环反向缓转 */
+.cover-ring::before {
+  content: ''; position: absolute; inset: -13px; border-radius: 50%;
+  border: 1px solid rgba(var(--ink-rgb), calc(.10 + var(--beat, 0) * .30));
+  animation: ringBeat 2.1s ease-in-out infinite, spinRev 64s linear infinite;
+}
+@keyframes ringBeat {
+  0%, 100% { transform: scale(1); opacity: .4; }
+  50% { transform: scale(calc(1.04 + var(--beat, 0) * .05)); opacity: 1; }
+}
+@keyframes spinRev { to { transform: rotate(-360deg); } }
+.stage.paused .cover-ring,
+.stage.paused .cover-ring::before { animation-play-state: paused; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes vinyl { to { transform: rotate(360deg); } }
 @keyframes beatPulse { from { transform: scale(1); } to { transform: scale(calc(1 + var(--beat, 0) * .05)); } }
-.cover-ring { animation: beatPulse .14s ease-out infinite alternate, spin 42s linear infinite; }
 .cover-wrap img {
   width: min(24vw, 252px); aspect-ratio: 1; object-fit: cover; border-radius: 20px;
   box-shadow: 0 22px 60px rgba(0,0,0,.6); transition: transform .4s cubic-bezier(.32,.72,.35,1);
@@ -465,12 +477,49 @@ body::before {
   padding: 11px 0; font-family: var(--serif); font-size: 19px; line-height: 1.6;
   letter-spacing: .05em; color: var(--txt-dim); text-align: center;
   transition: color .35s, transform .35s, opacity .35s; opacity: .6; cursor: pointer;
+  will-change: transform, opacity, filter;
 }
 .lyrics .line:hover { opacity: .9; }
-.lyrics .line.cur { color: rgb(var(--ink-glow-rgb)); font-size: 23px; opacity: 1; transform: scale(1.03); text-shadow: 0 0 26px rgba(var(--ink-rgb), .42); }
+.lyrics .line.cur {
+  color: rgb(var(--ink-glow-rgb)); font-size: 23px; opacity: 1;
+  transform: scale(1.03); text-shadow: 0 0 26px rgba(var(--ink-rgb), .42);
+  animation: inkIn .62s cubic-bezier(.23, .86, .42, 1) both;
+}
+/* 切走的行：下沉淡出，像墨迹沉入纸底 */
+.lyrics .line.was { animation: inkOut .55s ease both; }
+@keyframes inkIn {
+  from { opacity: 0; filter: blur(7px); letter-spacing: .34em; transform: translateY(12px) scale(.965); }
+  55% { filter: blur(0); }
+  to { opacity: 1; filter: blur(0); letter-spacing: .05em; transform: translateY(0) scale(1.03); }
+}
+@keyframes inkOut {
+  from { opacity: .6; filter: blur(0); transform: translateY(0) scale(1); }
+  to { opacity: .26; filter: blur(3px); transform: translateY(9px) scale(.99); }
+}
+/* 行首朱砂墨点：随当前句晕开再淡去 */
+.lyrics .line.cur::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  margin-right: 11px; vertical-align: .42em;
+  background: radial-gradient(circle, rgba(191, 58, 44, .9), rgba(191, 58, 44, .28) 55%, transparent 78%);
+  animation: vermilion 1.25s ease-out .04s both;
+}
+@keyframes vermilion {
+  0% { transform: scale(0); opacity: 0; }
+  32% { transform: scale(1.3); opacity: .95; }
+  62% { transform: scale(.95); opacity: .55; }
+  100% { transform: scale(.85); opacity: 0; }
+}
 .karaoke span { transition: color .16s linear; }
 .karaoke span.lit { color: rgb(var(--ink-glow-rgb)); }
 .karaoke span.singing { color: rgb(var(--ink-glow-rgb)); text-shadow: 0 0 16px rgba(var(--ink-rgb), .75); }
+/* 无逐字时间轴的 LRC：按整句时长均摊到每个字 */
+.lyrics .line .ch { transition: color .16s linear, text-shadow .16s linear; }
+.lyrics .line .ch.lit { color: rgb(var(--ink-glow-rgb)); }
+.lyrics .line .ch.singing { color: rgb(var(--ink-glow-rgb)); text-shadow: 0 0 14px rgba(var(--ink-rgb), .8); }
+.lyrics .line .tr {
+  display: block; font-family: var(--sans); font-size: 13px; letter-spacing: .03em;
+  opacity: .55; margin-top: 4px;
+}
 
 /* 控制舱 */
 .controls { position: relative; z-index: 2; width: min(620px, 100%); margin: 0 auto; }
@@ -1124,4 +1173,76 @@ body.is-scrolled .topbar {
 }
 @media (prefers-reduced-motion: reduce) {
   .unified-pill, .acc-card { transition: none !important; }
+}
+
+/* ═══════════════════════════════════════════════
+   视觉增强：全站墨晕 / 3D 流光 / 骨架屏 / pill 呼吸
+   ═══════════════════════════════════════════════ */
+
+/* —— 全站封面取色墨晕：两团主色在页面两角缓慢呼吸（颜色由 JS 随封面缓动写入） —— */
+.page-halo { position: fixed; inset: 0; z-index: -1; pointer-events: none; overflow: hidden; }
+.page-halo i { position: absolute; display: block; border-radius: 50%; animation: haloBreath 60s ease-in-out infinite; }
+.page-halo .ha {
+  width: 54vw; height: 54vw; left: -17vw; bottom: -21vw;
+  background: radial-gradient(circle, rgba(var(--halo-a, 230, 176, 106), .11), transparent 68%);
+}
+.page-halo .hb {
+  width: 46vw; height: 46vw; right: -15vw; top: -17vw;
+  background: radial-gradient(circle, rgba(var(--halo-b, 143, 184, 174), .09), transparent 68%);
+  animation-delay: -30s;
+}
+@keyframes haloBreath {
+  0%, 100% { opacity: .45; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.13); }
+}
+
+/* —— 卡片 3D 倾斜 + 琥珀流光（--rx/--ry/--sx 由 JS 委托写入） —— */
+.rail-card, .pl-cell { transform-style: preserve-3d; }
+.rail-card.tilting, .pl-cell.tilting {
+  transform: perspective(720px) rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg)) translateY(-2px);
+  transition: transform .07s linear;
+}
+.rail-card.tilting img, .pl-cell.tilting img { transform: translateY(-3px) scale(1.035); border-color: rgba(var(--amber-rgb), .45); }
+.rail-card::after, .pl-cell::after {
+  content: ''; position: absolute; z-index: 2; pointer-events: none; opacity: 0;
+  left: var(--sh-x, 0px); top: var(--sh-y, 0px);
+  width: var(--sh-w, 128px); height: var(--sh-h, 128px); border-radius: 14px;
+  background: linear-gradient(115deg,
+    transparent 32%, rgba(255, 255, 255, .07) 44%,
+    rgba(var(--amber-rgb), .20) 50%, rgba(255, 255, 255, .05) 56%, transparent 68%);
+  transform: translateX(var(--sx, -130%));
+  transition: opacity .35s ease;
+  mix-blend-mode: screen;
+}
+.rail-card.tilting::after, .pl-cell.tilting::after { opacity: 1; transition: opacity .18s ease; }
+
+/* —— 墨染骨架屏：汇聚等待期的墨晕脉冲占位 —— */
+.u-skel { padding: 14px 0 4px; border-top: 1px solid var(--line); }
+.u-skel .u-head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+.u-skel .sk { position: relative; overflow: hidden; background: var(--ink-2); border-radius: 14px; }
+.u-skel .sk::after {
+  content: ''; position: absolute; inset: 0; transform: translateX(-100%);
+  background: linear-gradient(100deg, transparent 28%, rgba(var(--amber-rgb), .07) 50%, transparent 72%);
+  animation: skSweep 1.7s ease-in-out infinite;
+}
+@keyframes skSweep { to { transform: translateX(100%); } }
+.u-skel .sk-dot { width: 26px; height: 26px; border-radius: 50%; flex: none; }
+.u-skel .sk-line { height: 12px; width: 150px; border-radius: 6px; }
+.u-skel .sk-rail { display: flex; gap: 14px; overflow: hidden; }
+.u-skel .sk-card { flex: 0 0 128px; }
+.u-skel .sk-card .sk:first-child { width: 128px; height: 128px; }
+.u-skel .sk-card .sk:nth-child(2) { width: 92px; height: 11px; margin-top: 8px; border-radius: 5px; }
+
+/* —— 已连接平台 pill：呼吸光点 —— */
+.unified-pill.on i { animation: pillBreath 2.8s ease-in-out infinite; }
+@keyframes pillBreath {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(143, 184, 174, 0); }
+  50% { box-shadow: 0 0 11px 1px rgba(143, 184, 174, .38); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .page-halo i, .unified-pill.on i, .cover-ring, .cover-ring::before,
+  .lyrics .line.cur, .lyrics .line.cur::before, .lyrics .line.was,
+  .u-skel .sk::after { animation: none !important; }
+  .rail-card.tilting, .pl-cell.tilting { transform: none; }
 }
