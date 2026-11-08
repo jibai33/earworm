@@ -1,4 +1,4 @@
-const CACHE = 'earworm-v7';
+const CACHE = 'earworm-v9';
 const SHELL = ['./', './index.html', './app.css', './app.js', './boot.js', './taste.js', './taste-ui.js', './icon.svg', './manifest.webmanifest'];
 
 self.addEventListener('install', (e) => {

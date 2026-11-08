@@ -303,7 +303,8 @@ body::before {
 }
 .mine-card img { width: 52px; height: 52px; }
 .mine-name { font-family: var(--serif); font-size: 18px; letter-spacing: .08em; }
-.mine-vip { font-size: 12px; color: var(--amber); margin-top: 4px; }
+.mine-vip { font-size: 12px; color: var(--txt-dim); margin-top: 4px; }
+.mine-vip.vip-on { color: var(--amber); letter-spacing: .02em; }
 .login-tip-card { justify-content: space-between; }
 .login-tip-card p { font-size: 14px; color: var(--txt-dim); }
 .pl-list { margin-top: 4px; }
@@ -527,7 +528,7 @@ body::before {
 .login-card {
   background: var(--glass-strong); backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
   border: 1px solid var(--line-2); border-radius: var(--r-lg); box-shadow: var(--shadow-pop);
-  padding: 26px; text-align: center; width: min(88vw, 360px);
+  padding: 26px; text-align: center; width: min(92vw, 440px);
   max-height: 86dvh; overflow-y: auto;
 }
 .login-card h2 { font-family: var(--serif); font-size: 19px; letter-spacing: .12em; }
@@ -972,4 +973,155 @@ body.is-scrolled .topbar {
 }
 @media (prefers-reduced-motion: reduce) {
   .tr-btn, .tr-chip, .tr-song { transition: none !important; }
+}
+
+/* ═══════════════════════════════════════════════
+   统一音源 · 一次连接四平台同屏
+   ═══════════════════════════════════════════════ */
+.source-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 34px; padding: 0 10px; border-radius: 10px;
+  border: 1px solid var(--line-2); background: rgba(255,255,255,.035);
+  color: var(--txt-dim); cursor: pointer; font-size: 12px;
+  transition: color .2s, border-color .2s, background .2s;
+}
+.source-btn:hover { color: var(--amber); border-color: rgba(var(--amber-rgb), .5); }
+.source-btn .acc-glyph { font-family: var(--serif); font-size: 15px; color: var(--amber); }
+.source-btn .acc-count { font-variant-numeric: tabular-nums; letter-spacing: .04em; }
+.source-btn.all-connected { color: var(--celadon); border-color: rgba(143,184,174,.45); }
+.source-btn.degraded { color: var(--cinnabar); }
+.src-tab.all-src { font-family: var(--serif); }
+.song .src-tag.alt { color: var(--celadon); border-color: rgba(143,184,174,.35); }
+
+/* 搜索：逐平台回报 */
+.search-source-summary { display: flex; gap: 6px; flex-wrap: wrap; padding: 6px 0 2px; }
+.ss-pill {
+  display: inline-flex; align-items: baseline; gap: 5px;
+  padding: 3px 9px; border-radius: 999px; font-size: 11px;
+  border: 1px solid var(--line-2); color: var(--txt-dim);
+  background: rgba(255,255,255,.025);
+}
+.ss-pill b { font-weight: 500; color: var(--txt); }
+.ss-pill em { font-style: normal; font-variant-numeric: tabular-nums; }
+.ss-pill.ok b { color: var(--amber); }
+.ss-pill.public b { color: var(--celadon); }
+.ss-pill.need { border-color: rgba(230,176,106,.4); }
+.ss-pill.need em { color: var(--amber); }
+.ss-pill.err { border-color: rgba(192,57,43,.45); }
+.ss-pill.err em { color: #e08578; }
+.ss-pill.clickable { cursor: pointer; }
+.ss-pill.clickable:hover { background: rgba(var(--amber-rgb), .1); }
+
+/* 首页：音源状态条 + 多平台栏目 */
+.bento > .bc-unified { --i: 8; }
+.unified-bar { display: flex; gap: 8px; flex-wrap: wrap; padding: 12px 2px 4px; }
+.unified-pill {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 6px 11px; border-radius: 999px; cursor: pointer;
+  border: 1px solid var(--line-2); background: rgba(255,255,255,.025);
+  color: var(--txt-dim); font-size: 12px; transition: all .2s;
+}
+.unified-pill i {
+  font-style: normal; font-family: var(--serif); font-size: 13px;
+  width: 22px; height: 22px; line-height: 22px; text-align: center;
+  border-radius: 50%; background: rgba(255,255,255,.06);
+}
+.unified-pill span { color: var(--txt); }
+.unified-pill em { font-style: normal; font-size: 10px; opacity: .8; }
+.unified-pill.on { border-color: rgba(143,184,174,.4); }
+.unified-pill.on i { background: rgba(143,184,174,.18); color: var(--celadon); }
+.unified-pill.on em { color: var(--celadon); }
+.unified-pill:hover { border-color: rgba(var(--amber-rgb), .5); transform: translateY(-1px); }
+
+.unified-home { display: flex; flex-direction: column; gap: 4px; }
+.u-sec { padding: 14px 0 4px; border-top: 1px solid var(--line); }
+.u-sec:first-child { border-top: 0; }
+.u-head { display: flex; align-items: center; gap: 10px; }
+.u-badge {
+  font-family: var(--serif); font-size: 11px; letter-spacing: .06em;
+  padding: 3px 9px; border-radius: 6px; flex-shrink: 0;
+  border: 1px solid rgba(var(--amber-rgb), .35); color: var(--amber);
+  background: rgba(var(--amber-rgb), .08);
+}
+.u-badge.need_login { border-color: rgba(192,57,43,.4); color: #e08578; background: rgba(192,57,43,.08); }
+.u-badge.error { border-color: rgba(192,57,43,.4); color: #e08578; }
+.u-title { min-width: 0; flex: 1; }
+.u-title b { display: block; font-family: var(--serif); font-size: 15px; font-weight: 500; }
+.u-title small { display: block; font-size: 11px; color: var(--txt-dim); margin-top: 2px; }
+.u-count { font-size: 11px; color: var(--txt-dim); font-variant-numeric: tabular-nums; }
+.u-rail { padding-top: 10px; }
+.u-empty, .u-loading {
+  padding: 16px 2px; font-size: 12px; color: var(--txt-dim);
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+}
+.u-empty .brush-btn { width: auto; margin: 0; padding: 5px 12px; font-size: 12px; }
+
+/* 曲库页：按平台分组 */
+.unified-library-wrap { margin-top: 6px; }
+.unified-library-wrap .sec-title .text-btn { margin-left: auto; }
+.u-lib { margin-bottom: 18px; }
+.u-lib-head { display: flex; align-items: center; gap: 9px; padding: 8px 0; }
+.u-lib-head b { font-family: var(--serif); font-size: 14px; font-weight: 500; }
+.u-lib-head em { margin-left: auto; font-style: normal; font-size: 11px; color: var(--txt-dim); }
+
+/* 登录总览：四张音源卡 */
+.account-overview { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin: 14px 0 6px; }
+.acc-card {
+  position: relative; padding: 12px; border-radius: var(--r-sm);
+  border: 1px solid var(--line); background: rgba(255,255,255,.025);
+  transition: border-color .2s, background .2s;
+}
+.acc-card.on { border-color: rgba(143,184,174,.35); background: rgba(143,184,174,.05); }
+.acc-card:hover { border-color: rgba(var(--amber-rgb), .4); }
+.acc-head { display: flex; align-items: center; gap: 9px; }
+.acc-g {
+  width: 32px; height: 32px; flex-shrink: 0; border-radius: 9px;
+  display: grid; place-items: center; font-family: var(--serif); font-size: 16px;
+  background: rgba(var(--amber-rgb), .12); color: var(--amber);
+}
+.acc-card.on .acc-g { background: rgba(143,184,174,.16); color: var(--celadon); }
+.acc-id { min-width: 0; flex: 1; }
+.acc-id b { display: block; font-size: 13px; font-weight: 500; }
+.acc-vip {
+  font-style: normal; font-size: 9px; letter-spacing: .04em; margin-left: 6px;
+  color: var(--amber-2, var(--amber)); border: 1px solid rgba(var(--amber-rgb), .4);
+  background: rgba(var(--amber-rgb), .12); border-radius: 4px; padding: 0 4px;
+  vertical-align: 1px;
+}
+.acc-detail { display: block; font-style: normal; font-size: 9px; color: var(--amber); margin-top: 2px; }
+.acc-id small { display: block; font-size: 10px; color: var(--txt-dim); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.acc-state { font-size: 10px; color: var(--txt-dim); flex-shrink: 0; }
+.acc-card.on .acc-state { color: var(--celadon); }
+.acc-caps { display: flex; gap: 4px; flex-wrap: wrap; margin: 10px 0 8px; min-height: 18px; }
+.acc-caps span { font-size: 9px; color: var(--txt-dim); border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px; }
+.acc-login { font-size: 10px; color: var(--txt-dim); margin: 0 0 8px; line-height: 1.5; min-height: 15px; }
+.acc-card.off .acc-login { color: rgba(230,176,106,.85); }
+.acc-go { width: 100%; margin: 0; padding: 5px 10px; font-size: 11px; }
+#account-connect-next:disabled { opacity: .5; cursor: default; }
+
+/* 网易云账号卡（登录弹窗内） */
+.ne-acct {
+  display: flex; align-items: center; gap: 12px; padding: 12px 14px; margin: 6px 0 14px;
+  border: 1px solid var(--line); border-radius: var(--r-md); background: rgba(255,255,255,.03);
+}
+.ne-avatar { width: 46px; height: 46px; border-radius: 50%; object-fit: cover; border: 1px solid var(--line); flex-shrink: 0; }
+.ne-info { flex: 1; min-width: 0; }
+.ne-info b { display: block; font-family: var(--serif); font-size: 15px; font-weight: 500; letter-spacing: .06em; }
+.ne-vip {
+  display: inline-block; font-size: 10px; color: var(--txt-dim); margin-top: 4px;
+  border: 1px solid var(--line); border-radius: 4px; padding: 1px 6px;
+}
+.ne-vip.on { color: var(--amber); border-color: rgba(var(--amber-rgb), .45); background: rgba(var(--amber-rgb), .12); }
+.ne-info small { display: block; font-size: 10px; color: var(--txt-dim); margin-top: 5px; line-height: 1.5; }
+
+@media (max-width: 899px) {
+  .account-overview { grid-template-columns: 1fr; }
+  .source-btn { padding: 0 8px; }
+  .source-btn .acc-count { display: none; }
+  .unified-bar { gap: 6px; }
+  .unified-pill { padding: 5px 8px; font-size: 11px; }
+  .u-title b { font-size: 14px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .unified-pill, .acc-card { transition: none !important; }
 }

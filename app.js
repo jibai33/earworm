@@ -39,8 +39,11 @@ const state = {
   quality: localStorage.getItem('ew_quality') || 'exhigh',
   liked: {}, user: null,
   pendingSeek: 0,
-  provider: localStorage.getItem('ew_provider') || 'netease',
+  // v2 默认「全部音源」：一次检索/一屏浏览覆盖所有已连接平台，不再手动切换
+  provider: localStorage.getItem('ew_provider_v2') || 'all',
+  unifiedPage: 0, unifiedSources: [], accountStatus: null,
 };
+const PROVIDER_LABEL = { netease: '云村', qq: 'QQ 音乐', qishui: '汽水', xy: '小宇宙', all: '全部音源' };
 
 /* ---------- 工具 ---------- */
 const fmt = (s) => { s = Math.max(0, Math.floor(s || 0)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
@@ -341,20 +344,305 @@ async function refreshLoginStatus() {
       if (r.avatar) $('user-avatar').src = r.avatar;
       $('mine-user').hidden = false; $('mine-login-tip').hidden = true;
       $('mine-name').textContent = r.nickname || '';
-      $('mine-vip').textContent = r.vipLabel && r.vipLabel !== '无VIP' ? r.vipLabel : '普通听众';
+      // 会员态来自 /vip/info/v2 的真实套餐，不再按 vipType 猜
+      const vipText = r.loggedIn
+        ? [r.vipLabel || '普通听众', r.vipExpireText ? `至 ${r.vipExpireText}` : '', r.level ? `Lv.${r.level}` : '']
+          .filter(Boolean).join(' · ')
+        : '';
+      $('mine-vip').textContent = vipText;
+      $('mine-vip').classList.toggle('vip-on', !!r.isVip);
       if (r.avatar) $('mine-avatar').src = r.avatar;
+      // 登录弹窗里的「我的账号」：直接展示会员套餐与到期日
+      if ($('ne-acct')) {
+        $('ne-acct').hidden = false;
+        $('ne-qr-box').hidden = true;
+        $('ne-name').textContent = r.nickname || '';
+        if (r.avatar) $('ne-avatar').src = r.avatar;
+        $('ne-vip').textContent = r.vipLabel || '普通听众';
+        $('ne-vip').classList.toggle('on', !!r.isVip);
+        $('ne-meta').textContent = [
+          r.vipExpireText ? `会员有效期至 ${r.vipExpireText}` : '',
+          r.level ? `Lv.${r.level}` : '',
+          r.playlistCount || r.subPlaylistCount ? `歌单 ${r.playlistCount || 0} 个 · 收藏 ${r.subPlaylistCount || 0} 个` : '',
+        ].filter(Boolean).join(' · ');
+      }
       loadMyPlaylists();
     } else {
       state.user = null;
       $('topbar-user').hidden = true; $('login-btn').hidden = false;
       $('logout-btn').hidden = true;
       $('mine-user').hidden = true; $('mine-login-tip').hidden = false;
+      if ($('ne-acct')) { $('ne-acct').hidden = true; $('ne-qr-box').hidden = false; }
     }
   } catch { $('login-btn').hidden = false; }
+  // 无论网易云是否登录，都要刷新四平台总览并重新汇聚首页/曲库
+  refreshAccountStatus();
 }
 function logout() {
   if (!confirm('退出登录并清除本机 cookie？')) return;
   api('/api/logout').then(refreshLoginStatus);
+}
+
+/* ====================================================================
+   统一音源层（前端）
+   一次连接 → 状态 / 首页 / 曲库 / 搜索 / 播放换源全部覆盖四个平台。
+   老服务没有 /api/unified/* 时给出可读降级提示，不阻断原有功能。
+   ==================================================================== */
+let lastConnectedKey = '';
+let unifiedReady = false;   // 统一汇聚成功时，旧的「仅网易云」首页卡片让位，避免重复
+
+async function refreshAccountStatus(force) {
+  let d;
+  try {
+    d = await api('/api/unified/status');
+    if (!d || !Array.isArray(d.providers)) throw new Error('统一音源接口返回异常');
+  } catch (e) {
+    d = {
+      degraded: true, connected: 0, total: 4, error: e.message,
+      providers: Object.keys(PROVIDER_LABEL).filter(k => k !== 'all').map(id => ({
+        id, short: PROVIDER_LABEL[id], label: PROVIDER_LABEL[id], glyph: '源',
+        loggedIn: false, capabilities: [], hint: '服务未启用统一音源接口',
+      })),
+    };
+  }
+  state.accountStatus = d;
+  renderAccountButton(d);
+  renderSourceBar(d);
+  renderAccountOverview(d);
+  if (d.degraded) {
+    $('unified-section').hidden = false;
+    $('unified-home').innerHTML = '<div class="u-empty">当前服务未启用统一音源接口，请升级本地 server.js 后刷新。' + '</div>';
+    $('unified-library').innerHTML = '<div class="u-empty">同上，需本地服务支持。</div>';
+    return;
+  }
+  const key = d.providers.map(p => p.id + ':' + (p.loggedIn ? 1 : 0)).join(',');
+  if (force || key !== lastConnectedKey) {
+    lastConnectedKey = key;
+    loadUnifiedHome();
+    loadUnifiedLibrary();
+  }
+}
+function renderAccountButton(d) {
+  const btn = $('account-btn'); if (!btn) return;
+  $('account-count').textContent = d.degraded ? '—' : `${d.connected}/${d.total}`;
+  btn.classList.toggle('all-connected', !d.degraded && d.connected === d.total);
+  btn.classList.toggle('degraded', !!d.degraded);
+  btn.title = d.degraded ? ('统一音源接口不可用：' + (d.error || ''))
+    : d.providers.map(p => `${p.label}：${p.loggedIn ? '已连接' : '未连接'}`).join('\n');
+}
+function renderSourceBar(d) {
+  const bar = $('unified-bar'); if (!bar) return;
+  bar.innerHTML = '';
+  d.providers.forEach(p => {
+    const el = document.createElement('button');
+    el.className = 'unified-pill ' + (p.loggedIn ? 'on' : 'off');
+    el.innerHTML = `<i>${escapeHtml(p.glyph || '源')}</i><span>${escapeHtml(p.short)}</span><em>${p.loggedIn ? '已连接' : '去连接'}</em>`;
+    el.title = p.loggedIn ? (p.nickname || p.label) : (p.hint || '点此连接');
+    el.onclick = () => openLogin(p.id);
+    bar.appendChild(el);
+  });
+}
+function renderAccountOverview(d) {
+  const box = $('account-overview'), note = $('account-overview-note');
+  if (!box || !note || !d || !Array.isArray(d.providers)) return;
+  box.innerHTML = '';
+  const hint = d.degraded ? '统一音源接口不可用：' + (d.error || '') : '';
+  d.providers.forEach(p => {
+    const card = document.createElement('div');
+    card.className = 'acc-card ' + (p.loggedIn ? 'on' : 'off');
+    const who = p.loggedIn ? (p.nickname || p.userId || p.detail || '已连接') : (p.error || p.hint || '连接后可解锁该平台内容');
+    // 会员态用真实套餐标签（黑胶 / 音乐包 + 到期日），而不是笼统的「已连接」
+    const vipTag = p.isVip ? `<i class="acc-vip">${escapeHtml(p.vipLabel || '会员')}</i>` : '';
+    const sub = p.loggedIn && p.detail && p.nickname
+      ? `<em class="acc-detail">${escapeHtml(p.detail)}</em>` : '';
+    card.innerHTML = `
+      <div class="acc-head"><span class="acc-g">${escapeHtml(p.glyph || '源')}</span>
+        <div class="acc-id"><b>${escapeHtml(p.label)}${vipTag}</b><small>${escapeHtml(String(who))}</small>${sub}</div>
+        <span class="acc-state">${p.loggedIn ? '已连接' : '待连接'}</span></div>
+      <div class="acc-caps">${(p.capabilities || []).length
+        ? p.capabilities.map(c => `<span>${escapeHtml(c)}</span>`).join('')
+        : '<span>连接后解锁</span>'}</div>
+      <div class="acc-login">${p.loginReady === false
+        ? '⚠ ' + escapeHtml(p.loginNote || p.error || '当前环境无可用登录通道')
+        : escapeHtml((p.loginMethods || []).join(' / ') || p.hint || '')}</div>
+      <button class="acc-go brush-btn">${p.loggedIn ? '管理' : '连接'}</button>`;
+    card.querySelector('.acc-go').onclick = () => switchLoginTab(p.id);
+    box.appendChild(card);
+  });
+  const left = d.degraded ? 0 : (d.total - d.connected);
+  note.textContent = hint || (left
+    ? `还有 ${left} 个音源未连接 · 授权后内容自动并入首页、搜索与曲库`
+    : '四个音源已全部连接 · 全站内容自动汇聚');
+  const next = $('account-connect-next');
+  if (next) { next.disabled = !left; next.textContent = left ? '连接下一个音源' : '已全部连接'; }
+}
+function connectNextSource() {
+  const d = state.accountStatus;
+  if (!d || d.degraded) return;
+  const next = d.providers.find(p => !p.loggedIn);
+  if (next) switchLoginTab(next.id);
+}
+
+/* ---------- 统一首页 ---------- */
+async function loadUnifiedHome() {
+  const box = $('unified-home'), sec = $('unified-section');
+  if (!box || !sec) return;
+  box.innerHTML = '<div class="u-loading">正在汇聚各平台音源……</div>';
+  sec.hidden = false;
+  try {
+    const d = await api('/api/unified/home');
+    const sections = (d.sections || []).filter(s => (s.items || []).length || s.status === 'need_login' || s.status === 'error');
+    if (!sections.length) { box.innerHTML = '<div class="u-empty">各平台暂未返回内容，点「重新汇聚」再试。</div>'; return; }
+    unifiedReady = true;
+    // 统一区已经覆盖四平台，旧的两个「网易云专属」区块就不再重复占屏
+    if ($('daily-rail-section')) $('daily-rail-section').hidden = true;
+    if ($('pl-grid-section')) $('pl-grid-section').hidden = true;
+    box.innerHTML = '';
+    sections.forEach((s, i) => box.appendChild(unifiedSectionEl(s, i)));
+  } catch (e) { box.innerHTML = `<div class="u-empty">统一汇聚暂不可用：${escapeHtml(e.message)}</div>`; }
+}
+function unifiedSectionEl(s, i) {
+  const wrap = document.createElement('div');
+  wrap.className = 'u-sec';
+  wrap.style.setProperty('--i', String(Math.min(i, 8)));
+  const head = document.createElement('div');
+  head.className = 'u-head';
+  head.innerHTML = `<span class="u-badge ${escapeHtml(s.status)}">${escapeHtml(s.short)}</span>
+    <div class="u-title"><b>${escapeHtml(s.title)}</b><small>${escapeHtml(s.subtitle || '')}</small></div>
+    <span class="u-count">${(s.items || []).length} 条</span>`;
+  wrap.appendChild(head);
+  const items = s.items || [];
+  if (!items.length) {
+    const empty = document.createElement('div');
+    empty.className = 'u-empty';
+    empty.textContent = s.message || '暂无内容';
+    if (s.action) {
+      const b = document.createElement('button');
+      b.className = 'brush-btn solid'; b.textContent = s.action.label;
+      b.onclick = () => openLogin(s.action.tab);
+      empty.appendChild(b);
+    }
+    wrap.appendChild(empty);
+    return wrap;
+  }
+  const rail = document.createElement('div'); rail.className = 'rail u-rail';
+  const playable = items.filter(x => !(x.isPodcast || x.type === 'podcast' || x.type === 'playlist'));
+  items.forEach((item, j) => {
+    const el = document.createElement('div');
+    el.className = 'rail-card';
+    el.style.setProperty('--i', String(Math.min(j, 12)));
+    el.innerHTML = `<img src="${coverUrl(item.cover) || 'icon.svg'}" loading="lazy" alt="">
+      <div class="rc-name">${escapeHtml(item.name)}</div>
+      <div class="rc-sub">${escapeHtml(item.artist || item.creator || s.short)}</div>`;
+    el.onclick = () => {
+      if (item.type === 'playlist') openUnifiedPlaylist(item.provider || s.provider, item.id, item.name);
+      else if (item.isPodcast || item.type === 'podcast') openXYPodcast(item.pid || item.id);
+      else { state.queue = playable.slice(); renderQueue(); playIndex(playable.indexOf(item)); }
+    };
+    rail.appendChild(el);
+  });
+  wrap.appendChild(rail);
+  return wrap;
+}
+
+/* ---------- 统一曲库 ---------- */
+async function loadUnifiedLibrary() {
+  const box = $('unified-library'); if (!box) return;
+  box.innerHTML = '<div class="u-loading">正在同步各方曲库……</div>';
+  try {
+    const d = await api('/api/unified/library');
+    box.innerHTML = '';
+    (d.groups || []).forEach(g => {
+      const sec = document.createElement('div'); sec.className = 'u-lib';
+      sec.innerHTML = `<div class="u-lib-head"><span class="u-badge">${escapeHtml(g.short)}</span><b>${escapeHtml(g.label)}</b><em>${(g.items || []).length}</em></div>`;
+      const items = g.items || [];
+      if (!items.length) {
+        const e = document.createElement('div'); e.className = 'u-empty';
+        e.textContent = g.message || '暂无内容';
+        if (g.action) {
+          const b = document.createElement('button');
+          b.className = 'brush-btn solid'; b.textContent = g.action.label;
+          b.onclick = () => openLogin(g.action.tab);
+          e.appendChild(b);
+        }
+        sec.appendChild(e);
+      } else {
+        items.forEach(p => {
+          const row = document.createElement('div'); row.className = 'pl-row';
+          row.innerHTML = `<img src="${coverUrl(p.cover) || 'icon.svg'}" loading="lazy" alt="">
+            <div style="flex:1;min-width:0"><div class="pr-name">${escapeHtml(p.name || '')}</div>
+            <div class="pr-sub">${escapeHtml(g.short)} · ${p.trackCount || p.episodesCount || 0} 首</div></div>`;
+          row.onclick = () => p.type === 'podcast'
+            ? openXYPodcast(p.pid || p.id)
+            : openUnifiedPlaylist(g.provider, p.id, p.name);
+          sec.appendChild(row);
+        });
+      }
+      box.appendChild(sec);
+    });
+  } catch (e) { box.innerHTML = `<div class="u-empty">曲库同步失败：${escapeHtml(e.message)}</div>`; }
+}
+
+/* ---------- 统一歌单详情（任意平台） ---------- */
+async function openUnifiedPlaylist(provider, id, name) {
+  $('pl-detail').hidden = false;
+  requestAnimationFrame(() => $('pl-detail').classList.add('show'));
+  $('pl-tracks').innerHTML = '<div class="song"><div class="meta"><div class="name">正在取曲……</div></div></div>';
+  try {
+    const d = await api(`/api/unified/playlist?provider=${encodeURIComponent(provider)}&id=${encodeURIComponent(id)}`);
+    const pl = d.playlist || {}, tracks = (d.tracks || []).map(s => Object.assign({}, s, { provider: s.provider || provider, source: s.source || provider }));
+    state.currentPl = tracks;
+    $('pl-cover').src = coverUrl(pl.cover) || 'icon.svg';
+    $('pl-name').textContent = pl.name || name || '曲单';
+    $('pl-count').textContent = `${pl.trackCount || tracks.length} 首 · ${PROVIDER_LABEL[provider] || provider}`;
+    $('pl-playall').onclick = () => { state.queue = tracks.slice(); renderQueue(); closePlDetail(); playIndex(0); };
+    const box = $('pl-tracks'); box.innerHTML = '';
+    tracks.forEach((s, i) => box.appendChild(songEl(s, i, i + 1)));
+    if (!tracks.length) box.innerHTML = '<div class="song"><div class="meta"><div class="name">该曲单暂不可读，可能需要重新连接这个音源</div></div></div>';
+  } catch (e) {
+    $('pl-tracks').innerHTML = `<div class="song"><div class="meta"><div class="name">取曲失败：${escapeHtml(e.message)}</div></div></div>`;
+  }
+}
+
+/* ---------- 全域搜索结果：逐平台回报 ---------- */
+function renderSearchSources(sources) {
+  const box = $('search-source-summary'); if (!box) return;
+  state.unifiedSources = sources;
+  box.hidden = false; box.innerHTML = '';
+  sources.forEach(s => {
+    const el = document.createElement('span');
+    const st = s.status;
+    el.className = 'ss-pill ' + (st === 'need_login' ? 'need' : st === 'error' ? 'err' : st === 'public' ? 'public' : 'ok');
+    const txt = st === 'need_login' ? '待登录' : st === 'error' ? '暂不可用' : `${s.count} 条`;
+    el.innerHTML = `<b>${escapeHtml(s.short)}</b><em>${escapeHtml(txt)}</em>`;
+    if (st === 'need_login' || st === 'error') {
+      el.classList.add('clickable');
+      el.title = s.message || '点此连接该音源';
+      el.onclick = () => openLogin(s.id);
+    }
+    box.appendChild(el);
+  });
+}
+async function doUnifiedSearch(kw, append) {
+  if (!append) {
+    state.unifiedPage = 0;
+    $('results').innerHTML = '<div class="song"><div class="meta"><div class="name">正在四平台同时寻曲……</div></div></div>';
+  }
+  try {
+    const d = await api(`/api/unified/search?keywords=${encodeURIComponent(kw)}&limit=12&page=${state.unifiedPage}`);
+    renderSearchSources(d.sources || []);
+    const songs = d.songs || [];
+    if (!append) { state.queue = []; $('results').innerHTML = ''; }
+    const start = state.queue.length;
+    state.queue.push(...songs);
+    songs.forEach((s, i) => $('results').appendChild(songEl(s, start + i)));
+    state.unifiedPage += 1;
+    $('more-btn-wrap').hidden = !d.hasMore;
+    renderQueue();
+    if (!state.queue.length) $('results').innerHTML = '<div class="song"><div class="meta"><div class="name">四个平台都没找到，换个关键词试试</div></div></div>';
+  } catch (e) {
+    $('results').innerHTML = `<div class="song"><div class="meta"><div class="name">全域寻曲失败：${escapeHtml(e.message)}</div></div></div>`;
+  }
 }
 
 /* ---------- 发现页（bento） ---------- */
@@ -393,7 +681,7 @@ async function loadDiscover() {
     const daily = d.dailySongs || [];
     state.daily = daily;
     updateContinueCard();
-    if (daily.length) {
+    if (daily.length && !unifiedReady) {
       $('daily-rail-section').hidden = false;
       const rail = $('daily-rail'); rail.innerHTML = '';
       daily.slice(0, 20).forEach((s, i) => {
@@ -406,7 +694,7 @@ async function loadDiscover() {
       });
     }
     const pls = d.playlists || [];
-    if (pls.length) {
+    if (pls.length && !unifiedReady) {
       $('pl-grid-section').hidden = false;
       const grid = $('pl-grid'); grid.innerHTML = '';
       pls.slice(0, 6).forEach((p, i) => {
@@ -528,13 +816,10 @@ $('search-input').addEventListener('keydown', (e) => {
 /* ---------- 搜索平台切换 ---------- */
 document.addEventListener('DOMContentLoaded', () => {
   $('src-tabs').querySelectorAll('.src-tab').forEach(btn => {
-    if (btn.dataset.src === state.provider) {
-      btn.parentElement.querySelectorAll('.src-tab').forEach(b => b.classList.remove('cur'));
-      btn.classList.add('cur');
-    }
+    btn.classList.toggle('cur', btn.dataset.src === state.provider);
     btn.addEventListener('click', () => {
       state.provider = btn.dataset.src;
-      localStorage.setItem('ew_provider', state.provider);
+      localStorage.setItem('ew_provider_v2', state.provider);
       btn.parentElement.querySelectorAll('.src-tab').forEach(b => b.classList.toggle('cur', b === btn));
       const kw = $('search-input').value.trim();
       if (kw) doSearch(kw);
@@ -543,6 +828,8 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 async function doSearch(kw, append) {
+  if (state.provider === 'all') return doUnifiedSearch(kw, append);
+  $('search-source-summary').hidden = true;
   if (!append) { state.offset = 0; $('results').innerHTML = '<div class="song"><div class="meta"><div class="name">正在寻曲……</div></div></div>'; }
   try {
     const ep = state.provider === 'qq' ? '/api/qq/search'
@@ -576,15 +863,18 @@ function songEl(s, i, idxLabel) {
   const el = document.createElement('div');
   el.className = 'song';
   el.dataset.i = i;
-  const SRC_LABEL = { qq: 'QQ', qishui: '汽水', xy: '小宇宙' };
-  const tag = s.provider && s.provider !== 'netease'
+  const SRC_LABEL = { netease: '云村', qq: 'QQ', qishui: '汽水', xy: '小宇宙' };
+  const showTag = state.provider === 'all' || (s.provider && s.provider !== 'netease');
+  const tag = showTag && s.provider
     ? `<span class="src-tag">${SRC_LABEL[s.provider] || s.provider}${s.isPodcast ? ' · 播客' : ''}</span>` : '';
+  const alt = (s.alsoOn || []).length
+    ? `<span class="src-tag alt">另见 ${s.alsoOn.map(p => SRC_LABEL[p] || p).join(' / ')}</span>` : '';
   el.innerHTML = `
     <div class="song-idx">${idxLabel != null ? idxLabel : ''}</div>
     <img src="${coverUrl(s.cover) || 'icon.svg'}" loading="lazy" alt="">
     <div class="meta">
       <div class="name">${escapeHtml(s.name)}</div>
-      <div class="artist">${escapeHtml(s.artist)}${s.fee === 1 ? ' · VIP' : ''}${tag}</div>
+      <div class="artist">${escapeHtml(s.artist)}${s.fee === 1 ? ' · VIP' : ''}${tag}${alt}</div>
     </div>`;
   el.addEventListener('click', () => {
     if (s.provider === 'xy' && s.isPodcast) openXYPodcast(s.pid || s.id);
@@ -670,6 +960,20 @@ async function playIndex(i) {
     bumpStats(s);
     saveState();
   } catch (err) {
+    // 统一音源：当前平台取不到地址（VIP / 版权 / 未登录）时自动换到其它平台的可播版本
+    if (!s._fallbackTried) {
+      s._fallbackTried = true;
+      try {
+        const alt = await api(`/api/unified/alternatives?name=${encodeURIComponent(s.name)}&artist=${encodeURIComponent(s.artist || '')}&exclude=${encodeURIComponent(s.provider || 'netease')}`);
+        const pick = (alt.candidates || [])[0];
+        if (pick) {
+          state.queue[i] = Object.assign({}, pick, { _fallbackTried: true });
+          $('mini-artist').textContent = `已自动换到「${PROVIDER_LABEL[pick.provider] || pick.provider}」音源…`;
+          renderQueue();
+          return playIndex(i);
+        }
+      } catch { /* 换源失败则回落到原始错误提示 */ }
+    }
     $('mini-artist').textContent = '⚠ ' + err.message;
     setPlayingUI(false);
   }
@@ -969,15 +1273,21 @@ function paintKaraoke(idx, c) {
 }
 
 /* ---------- 登录弹窗（三平台） ---------- */
+const LOGIN_TABS = ['all', 'netease', 'qishui', 'qq', 'xy'];
 function switchLoginTab(lp) {
-  $('login-tabs').querySelectorAll('.login-tab').forEach(b => b.classList.toggle('cur', b.dataset.lp === lp));
-  ['netease', 'qishui', 'qq', 'xy'].forEach(p => { $('lp-' + p).hidden = p !== lp; });
-  if (lp === 'netease') startQrLogin();
-  if (lp === 'qishui') { checkQishuiStatus(); if (!qishuiQrTimer && !qishuiQrToken) startQishuiQr(); }
-  else stopQishuiQrPoll();
-  if (lp === 'qq') { checkQQStatus(); refreshQQVipStatus(); if (!qqQrTimer && !qqQrId) startQQQr(); }
-  else stopQQQrPoll();
-  if (lp === 'xy') checkXYStatus();
+  const tab = LOGIN_TABS.includes(lp) ? lp : 'all';
+  $('login-tabs').querySelectorAll('.login-tab').forEach(b => b.classList.toggle('cur', b.dataset.lp === tab));
+  LOGIN_TABS.forEach(p => { $('lp-' + p).hidden = p !== tab; });
+  if (tab === 'all') refreshAccountStatus();
+  // 离开扫码页就停掉轮询，避免过期二维码在后台一直刷接口
+  // 已连接时不再生成二维码，避免"已登录还让我扫"的困惑
+  if (tab === 'netease' && !(state.user && state.user.loggedIn)) startQrLogin();
+  else { clearInterval(state.qrTimer); state.qrTimer = null; }
+  if (tab === 'qishui') { checkQishuiStatus(); if (!qishuiQrTimer && !qishuiQrToken) startQishuiQr(); }
+  else cancelQishuiQr();
+  if (tab === 'qq') { checkQQStatus(); refreshQQVipStatus(); if (!qqQrTimer && !qqQrId) startQQQr(); }
+  else cancelQQQr();
+  if (tab === 'xy') checkXYStatus();
 }
 async function startQrLogin() {
   $('qr-status').textContent = '正在生成二维码…';
@@ -988,16 +1298,18 @@ async function startQrLogin() {
     const c = await api(`/api/login/qr/create?key=${k.key}`);
     $('qr-img').src = c.img || c.qrimg || '';
     pollQr();
-  } catch (err) { $('qr-status').textContent = '⚠ ' + err.message; }
+  } catch (err) { $('qr-status').textContent = '⚠ ' + err.message + '（点「刷新二维码」重试）'; }
 }
 async function openLogin(lp) {
   $('login-modal').hidden = false;
-  switchLoginTab(typeof lp === 'string' ? lp : 'netease');
+  switchLoginTab(typeof lp === 'string' ? lp : 'all');
 }
-let qishuiQrToken = '', qishuiQrTimer = null;
+let qishuiQrToken = '', qishuiQrTimer = null, qishuiQrGen = 0;
 function stopQishuiQrPoll() {
   if (qishuiQrTimer) { clearInterval(qishuiQrTimer); qishuiQrTimer = null; }
 }
+/* 切走标签页 / 关闭弹窗时，连同「还在生成中」的二维码一起作废 */
+function cancelQishuiQr() { qishuiQrGen++; stopQishuiQrPoll(); qishuiQrToken = ''; }
 async function checkQishuiStatus() {
   const st = $('qishui-cookie-status');
   st.textContent = '查询登录态……';
@@ -1011,12 +1323,14 @@ async function checkQishuiStatus() {
 
 /* 抖音 App 扫码：二维码由服务端签名引擎生成，前端只负责展示与轮询 */
 async function startQishuiQr() {
+  const gen = ++qishuiQrGen;
   stopQishuiQrPoll();
   const qrSt = $('qishui-qr-status'), img = $('qishui-qr-img'), btn = $('qishui-qr-refresh');
   btn.disabled = true; img.hidden = true;
   qrSt.textContent = '正在生成二维码（首次要启动本机浏览器内核，约 5–15 秒）……';
   try {
     const r = await api('/api/qishui/login/qrcode', { method: 'POST' });
+    if (gen !== qishuiQrGen) return; // 已切走或刷新，丢弃这次结果
     if (!r.ok || !r.qrcode) { qrSt.textContent = '⚠ ' + (r.error || '二维码生成失败'); btn.disabled = false; return; }
     qishuiQrToken = r.token;
     img.src = r.qrcode; img.hidden = false; btn.disabled = false;
@@ -1043,7 +1357,7 @@ async function startQishuiQr() {
 }
 $('qishui-qr-refresh').addEventListener('click', startQishuiQr);
 $('qishui-qr-clear').addEventListener('click', () => {
-  stopQishuiQrPoll(); qishuiQrToken = '';
+  cancelQishuiQr();
   api('/api/qishui/logout').then(() => {
     $('qishui-qr-img').hidden = true;
     $('qishui-qr-status').textContent = '点上面按钮生成二维码';
@@ -1064,11 +1378,12 @@ async function checkQQStatus() {
 }
 
 /* QQ 音乐：三条扫码通道（手机 QQ / 微信 / QQ 音乐 App），凭据由服务端换取并落盘 */
-let qqQrChannel = 'qq', qqQrId = '', qqQrTimer = null, qqQrBusy = false;
+let qqQrChannel = 'qq', qqQrId = '', qqQrTimer = null, qqQrBusy = false, qqQrGen = 0;
 function stopQQQrPoll() {
   if (qqQrTimer) { clearInterval(qqQrTimer); qqQrTimer = null; }
   qqQrBusy = false;
 }
+function cancelQQQr() { qqQrGen++; stopQQQrPoll(); qqQrId = ''; }
 async function refreshQQVipStatus() {
   const box = $('qq-vip-status');
   box.classList.remove('ready');
@@ -1086,6 +1401,7 @@ async function refreshQQVipStatus() {
   } catch (e) { box.textContent = '⚠ 授权状态查询失败：' + e.message; }
 }
 async function startQQQr() {
+  const gen = ++qqQrGen;
   stopQQQrPoll();
   const st = $('qq-qr-status'), img = $('qq-qr-img'), btn = $('qq-qr-refresh');
   btn.disabled = true; img.hidden = true;
@@ -1095,6 +1411,7 @@ async function startQQQr() {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ channel: qqQrChannel }),
     });
+    if (gen !== qqQrGen) return; // 已切走或换通道，丢弃这次结果
     if (!r.ok || !r.qrcode) { st.textContent = '⚠ ' + (r.error || '二维码生成失败'); btn.disabled = false; return; }
     qqQrId = r.id;
     img.src = r.qrcode; img.hidden = false; btn.disabled = false;
@@ -1126,7 +1443,7 @@ $('qq-channels').querySelectorAll('.qq-channel').forEach(b => b.addEventListener
 }));
 $('qq-qr-refresh').addEventListener('click', () => { qqQrId = ''; startQQQr(); });
 $('qq-qr-clear').addEventListener('click', () => {
-  stopQQQrPoll(); qqQrId = '';
+  cancelQQQr();
   api('/api/qq/logout').then(() => {
     $('qq-qr-img').hidden = true;
     $('qq-qr-status').textContent = '点「生成 / 刷新二维码」重新扫码';
@@ -1258,12 +1575,22 @@ function pollQr() {
     } catch { /* 网络抖动忽略 */ }
   }, 2500);
 }
-$('login-btn').addEventListener('click', openLogin);
+$('login-btn').addEventListener('click', () => openLogin('all'));
+$('account-btn').addEventListener('click', () => openLogin('all'));
+$('account-connect-next').addEventListener('click', connectNextSource);
+$('account-refresh').addEventListener('click', () => refreshAccountStatus(true));
+$('qr-refresh').addEventListener('click', startQrLogin);
+if ($('ne-logout')) $('ne-logout').addEventListener('click', () => {
+  if (!confirm('退出网易云登录并清除本机 cookie？')) return;
+  api('/api/logout').then(() => refreshLoginStatus());
+});
+$('unified-refresh').addEventListener('click', () => { refreshAccountStatus(true); loadUnifiedHome(); });
+$('lib-refresh').addEventListener('click', () => loadUnifiedLibrary());
 $('login-close').addEventListener('click', () => {
   $('login-modal').hidden = true;
   clearInterval(state.qrTimer); state.qrKey = null;
-  stopQishuiQrPoll();
-  if (typeof stopQQQrPoll === 'function') stopQQQrPoll();
+  cancelQishuiQr();
+  cancelQQQr();
 });
 
 /* ---------- 倍速 ---------- */
