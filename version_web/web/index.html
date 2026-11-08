@@ -130,6 +130,9 @@
 <link rel="stylesheet" href="./app.css">
 </head>
 <body>
+<!-- 全站墨晕：随正在播放的封面取色，在页面两角缓慢呼吸（z-index -1，垫在内容之下） -->
+<div class="page-halo" aria-hidden="true"><i class="ha"></i><i class="hb"></i></div>
+
 <!-- ══ 开机动画：国风墨染 · 印章浮现 ══
      纯 CSS 自动播完并退场（JS 失效也不会挡住首页），boot.js 只负责跳过、诗词与收尾清理 -->
 <div id="boot" role="status" aria-label="闻曲 · 正在展开曲卷">

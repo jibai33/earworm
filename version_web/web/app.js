@@ -192,8 +192,7 @@ addEventListener('resize', ensureInkSize);
 function drawInk(t) {
   requestAnimationFrame(drawInk);
   if (!inkCanvas.width) resizeInk();
-  if (inkStage.hidden || document.hidden) return;
-  // 换歌时颜色缓动过渡
+  // 颜色缓动与 CSS 变量喂色不依赖舞台可见——首页的墨晕层也要吃到封面色
   for (const k in inkCur) {
     for (let i = 0; i < 3; i++) inkCur[k][i] += (inkTarget[k][i] - inkCur[k][i]) * .05;
   }
@@ -201,7 +200,11 @@ function drawInk(t) {
     inkStage.style.setProperty('--ink-rgb', inkCur.acc.map(v => Math.round(v)).join(','));
     inkStage.style.setProperty('--ink-glow-rgb', inkCur.accGlow.map(v => Math.round(v)).join(','));
     inkCss.glow = inkCur.accGlow.map(v => Math.round(v)).join(',');
+    // 全站墨晕：主色 / 辅色喂给页面两角的呼吸层，换歌时整体渐变
+    document.documentElement.style.setProperty('--halo-a', inkCur.main.map(v => Math.round(v)).join(','));
+    document.documentElement.style.setProperty('--halo-b', inkCur.sub.map(v => Math.round(v)).join(','));
   }
+  if (inkStage.hidden || document.hidden) return;
   const W = inkCanvas.width, H = inkCanvas.height;
   const beat = state.playing ? (state.level || 0) : 0;
   inkCtx.clearRect(0, 0, W, H);
@@ -298,12 +301,14 @@ function ensureAudioGraph() {
 }
 const spCanvas = $('spectrum');
 const spCtx = spCanvas.getContext('2d');
-let lowAvg = 0;
+let lowAvg = 0, silentFrames = 0;
 function drawSpectrum() {
   requestAnimationFrame(drawSpectrum);
-  if (!spCanvas.width) resizeSpectrum();
   spCtx.clearRect(0, 0, spCanvas.width, spCanvas.height);
-  if (!analyser || !state.playing) { state.level = 0; return; }
+  if (!state.playing) { state.level = 0; document.documentElement.style.setProperty('--beat', '0'); return; }
+  // 没有分析器或数据全零（个别直链拿不到频谱）时，用缓慢正弦模拟律动兜底，
+  // 保证光环 / 墨晕 / 频谱不会在播放中「死」在静止状态
+  if (!analyser) return fakeLevel();
   analyser.getByteFrequencyData(freqData);
   const bars = 48, step = Math.floor(freqData.length / bars);
   const w = spCanvas.width / bars;
@@ -314,22 +319,60 @@ function drawSpectrum() {
     v = v / step / 255;
     sum += v;
     const h = Math.max(2, v * spCanvas.height * .9);
+    // 墨条：柔光 + 圆头，像一笔笔竖起的墨痕
     const grad = spCtx.createLinearGradient(0, spCanvas.height, 0, spCanvas.height - h);
     grad.addColorStop(0, `rgba(${inkCss.glow},.15)`);
     grad.addColorStop(1, `rgba(${inkCss.glow},${.25 + v * .6})`);
     spCtx.fillStyle = grad;
-    spCtx.fillRect(i * w + w * .18, spCanvas.height - h, w * .64, h);
+    spCtx.shadowColor = `rgba(${inkCss.glow},${.25 + v * .45})`;
+    spCtx.shadowBlur = 4 + v * 16;
+    spCtx.beginPath();
+    const bx = i * w + w * .18, bw = w * .64, top = spCanvas.height - h, r = bw / 2;
+    spCtx.moveTo(bx, spCanvas.height);
+    spCtx.lineTo(bx, top + r);
+    spCtx.arc(bx + r, top + r, r, Math.PI, 0);
+    spCtx.lineTo(bx + bw, spCanvas.height);
+    spCtx.closePath();
+    spCtx.fill();
   }
+  spCtx.shadowBlur = 0;
   lowAvg = lowAvg * .8 + (sum / bars) * .2;
+  if (sum / bars < .004 && ++silentFrames > 40) return fakeLevel();
+  silentFrames = 0;
   state.level = Math.min(1.4, lowAvg * 2.2);
   document.documentElement.style.setProperty('--beat', state.level.toFixed(3));
 }
+/* 模拟律动：约 0.9s 一个起伏，幅度收敛，不做夸张假跳 */
+function fakeLevel() {
+  silentFrames = 0;
+  const t = performance.now() / 1000;
+  state.level = .14 + .09 * Math.abs(Math.sin(t * 3.4)) + .04 * Math.abs(Math.sin(t * 1.1));
+  document.documentElement.style.setProperty('--beat', state.level.toFixed(3));
+  if (analyser) {
+    // 无真实数据时频谱条也保持呼吸，而不是一根根趴平
+    const bars = 48, w = spCanvas.width / bars;
+    for (let i = 0; i < bars; i++) {
+      const v = Math.max(0, state.level * (.4 + .6 * Math.abs(Math.sin(i * .6 + t * 2.2))));
+      const h = Math.max(2, v * spCanvas.height * .5);
+      spCtx.fillStyle = `rgba(${inkCss.glow},${.1 + v * .4})`;
+      spCtx.fillRect(i * w + w * .18, spCanvas.height - h, w * .64, h);
+    }
+  }
+}
 function resizeSpectrum() {
   if (!spCanvas.offsetParent) return;
-  spCanvas.width = spCanvas.clientWidth * devicePixelRatio;
-  spCanvas.height = spCanvas.clientHeight * devicePixelRatio;
+  const w = Math.round(spCanvas.clientWidth * devicePixelRatio);
+  const h = Math.round(spCanvas.clientHeight * devicePixelRatio);
+  if (!w || !h) return;
+  // 尺寸没变就不重设：给 canvas 赋 width 会清空位图，每帧重设会闪
+  if (spCanvas.width === w && spCanvas.height === h) return;
+  spCanvas.width = w; spCanvas.height = h;
 }
 addEventListener('resize', resizeSpectrum);
+// 播放器展开 / 折叠时 clientWidth 会变，窗口没 resize 也要跟着同步，
+// 否则画布停在默认 300×150 被 CSS 硬拉伸，墨条是糊的
+if ('ResizeObserver' in window) new ResizeObserver(resizeSpectrum).observe(spCanvas);
+resizeSpectrum();
 requestAnimationFrame(drawSpectrum);
 
 /* ---------- 登录态 ---------- */
@@ -484,10 +527,19 @@ function connectNextSource() {
 }
 
 /* ---------- 统一首页 ---------- */
+/* 墨染骨架屏：等待期先铺出栏目轮廓，比一行文字更有「正在展开」的预期 */
+function skeletonRail() {
+  return '<div class="sk-rail">' +
+    Array.from({ length: 8 }, () => '<div class="sk-card"><div class="sk"></div><div class="sk"></div></div>').join('') +
+    '</div>';
+}
+const SKELETON_HOME = Array.from({ length: 3 }, (_, i) =>
+  `<div class="u-skel" style="--i:${i}"><div class="u-head"><span class="sk sk-dot"></span><span class="sk sk-line"></span></div>${skeletonRail()}</div>`
+).join('');
 async function loadUnifiedHome() {
   const box = $('unified-home'), sec = $('unified-section');
   if (!box || !sec) return;
-  box.innerHTML = '<div class="u-loading">正在汇聚各平台音源……</div>';
+  box.innerHTML = SKELETON_HOME;
   sec.hidden = false;
   try {
     const d = await api('/api/unified/home');
@@ -548,7 +600,7 @@ function unifiedSectionEl(s, i) {
 /* ---------- 统一曲库 ---------- */
 async function loadUnifiedLibrary() {
   const box = $('unified-library'); if (!box) return;
-  box.innerHTML = '<div class="u-loading">正在同步各方曲库……</div>';
+  box.innerHTML = SKELETON_HOME;
   try {
     const d = await api('/api/unified/library');
     box.innerHTML = '';
@@ -826,6 +878,64 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 });
+
+/* ---------- 视觉增强：卡片 3D 倾斜 + 流光 / 水印视差 ---------- */
+/* 事件委托接管所有卡片（含动态渲染的），只设 CSS 变量，不碰点击逻辑 */
+const tiltFine = matchMedia('(pointer: fine)').matches
+  && !matchMedia('(prefers-reduced-motion: reduce)').matches;
+if (tiltFine) {
+  let tiltEl = null, tiltRaf = 0;
+  document.addEventListener('pointerover', (e) => {
+    const t = e.target instanceof Element ? e.target.closest('.rail-card, .pl-cell') : null;
+    if (t === tiltEl) return;
+    if (tiltEl) tiltEl.classList.remove('tilting');
+    tiltEl = t;
+    if (!t) return;
+    t.classList.add('tilting');
+    // 流光层与封面同样大小、对齐封面位置（不同卡型的封面尺寸不同）
+    const img = t.querySelector('img');
+    if (img) {
+      const ir = img.getBoundingClientRect(), cr = t.getBoundingClientRect();
+      t.style.setProperty('--sh-x', (ir.left - cr.left) + 'px');
+      t.style.setProperty('--sh-y', (ir.top - cr.top) + 'px');
+      t.style.setProperty('--sh-w', ir.width + 'px');
+      t.style.setProperty('--sh-h', ir.height + 'px');
+    }
+  });
+  document.addEventListener('pointermove', (e) => {
+    if (!tiltEl) return;
+    if (tiltRaf) return;
+    tiltRaf = requestAnimationFrame(() => {
+      tiltRaf = 0;
+      const r = tiltEl.getBoundingClientRect();
+      const px = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
+      const py = Math.min(1, Math.max(0, (e.clientY - r.top) / r.height));
+      tiltEl.style.setProperty('--ry', ((px - .5) * 9).toFixed(2) + 'deg');
+      tiltEl.style.setProperty('--rx', ((.5 - py) * 9).toFixed(2) + 'deg');
+      tiltEl.style.setProperty('--sx', (-135 + px * 270).toFixed(0) + '%');
+    });
+  }, { passive: true });
+  document.addEventListener('pointerout', (e) => {
+    if (!tiltEl) return;
+    const to = e.relatedTarget instanceof Element ? e.relatedTarget.closest('.rail-card, .pl-cell') : null;
+    if (e.target === tiltEl && to !== tiltEl) { tiltEl.classList.remove('tilting'); tiltEl = null; }
+  });
+}
+/* 巨型水印字（曲/册/日日新/续）随页面滚动缓慢上浮，制造纵深 */
+{
+  const page = document.querySelector('.page');
+  if (page) {
+    let paraRaf = 0;
+    page.addEventListener('scroll', () => {
+      if (paraRaf) return;
+      paraRaf = requestAnimationFrame(() => {
+        paraRaf = 0;
+        const y = page.scrollTop * -.055;
+        document.querySelectorAll('.bc-glyph').forEach(el => { el.style.translate = `0 ${y.toFixed(1)}px`; });
+      });
+    }, { passive: true });
+  }
+}
 
 async function doSearch(kw, append) {
   if (state.provider === 'all') return doUnifiedSearch(kw, append);
@@ -1243,8 +1353,23 @@ async function loadLyrics(song) {
     });
     state.lyrics.forEach((l, i) => {
       const el = document.createElement('div');
-      el.className = 'line'; el.dataset.i = i;
-      el.innerHTML = escapeHtml(l.text).replace('\n', '<br>');
+      el.className = 'line chars'; el.dataset.i = i;
+      // 无逐字时间轴：用下一句起点估出本句时长，均摊到每个字做「伪卡拉」
+      const next = state.lyrics[i + 1];
+      el.dataset.dur = Math.min(12, Math.max(2, (next ? next.t : l.t + 6) - l.t)).toFixed(2);
+      const parts = l.text.split('\n');
+      const frag = document.createDocumentFragment();
+      for (const ch of parts[0]) {
+        const sp = document.createElement('span');
+        sp.className = 'ch'; sp.textContent = ch;
+        frag.appendChild(sp);
+      }
+      if (parts[1]) {
+        const tr = document.createElement('span');
+        tr.className = 'tr'; tr.textContent = parts[1];
+        frag.appendChild(tr);
+      }
+      el.appendChild(frag);
       el.addEventListener('click', () => { if (audio.duration) audio.currentTime = l.t; });
       $('lyrics').appendChild(el);
     });
@@ -1254,22 +1379,41 @@ function syncLyric(c) {
   if (!state.lyrics.length) return;
   let idx = -1;
   for (let i = 0; i < state.lyrics.length; i++) { if (state.lyrics[i].t <= c + .2) idx = i; else break; }
-  if (idx === state.curLyric) { if (state.karaoke && idx >= 0) paintKaraoke(idx, c); return; }
+  if (idx === state.curLyric) { paintLyric(idx, c); return; }
   state.curLyric = idx;
   const nodes = $('lyrics').children;
+  const prev = $('lyrics').querySelector('.line.cur');
+  if (prev && Number(prev.dataset.i) !== idx) {
+    prev.classList.remove('cur');
+    prev.classList.add('was');
+    setTimeout(() => { if (!prev.classList.contains('cur')) prev.classList.remove('was'); }, 600);
+  }
   for (const n of nodes) n.classList.toggle('cur', Number(n.dataset.i) === idx);
   const cur = nodes[idx];
   if (cur) $('lyrics').scrollTop = cur.offsetTop - $('lyrics').clientHeight / 2 + cur.offsetHeight;
-  if (state.karaoke && idx >= 0) paintKaraoke(idx, c);
+  paintLyric(idx, c);
 }
-function paintKaraoke(idx, c) {
+/* 逐字点亮：yrc 有真实字级时间轴；普通 LRC 按句时长均摊（见 loadLyrics） */
+function paintLyric(idx, c) {
   const el = $('lyrics').children[idx];
   if (!el) return;
-  for (const sp of el.children) {
-    const s = +sp.dataset.start, e = +sp.dataset.end;
-    sp.classList.toggle('lit', c >= e);
-    sp.classList.toggle('singing', c >= s && c < e);
+  if (state.karaoke) {
+    for (const sp of el.children) {
+      const s = +sp.dataset.start, e = +sp.dataset.end;
+      sp.classList.toggle('lit', c >= e);
+      sp.classList.toggle('singing', c >= s && c < e);
+    }
+    return;
   }
+  if (!el.classList.contains('chars')) return;
+  const spans = el.querySelectorAll('.ch');
+  const t = state.lyrics[idx].t, dur = +el.dataset.dur || 6;
+  const prog = Math.max(0, Math.min(1, (c - t) / dur));
+  const litN = Math.floor(prog * spans.length);
+  spans.forEach((sp, k) => {
+    sp.classList.toggle('lit', k < litN);
+    sp.classList.toggle('singing', k === litN && prog > 0 && prog < 1);
+  });
 }
 
 /* ---------- 登录弹窗（三平台） ---------- */
