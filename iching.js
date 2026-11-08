@@ -3,7 +3,8 @@
    —— 三枚铜钱六掷成卦（金钱卦），老阴老阳为动爻，动则变之卦。
    卦名取《周易》六十四卦方阵；卦解引《周易》卦辞、爻辞、彖、象
    （经文见 iching-text.js），并按朱熹《易学启蒙》变占之例选取断辞；
-   白话部分只作取象撮要，不作吉凶断语。
+   白话卦解与逐条今译见 iching-plain.js，依字面直译，供理解经文，
+   不代下吉凶断言。
    独立模块：只往侧栏插一条签、往 body 挂一层面板，不改动播放器逻辑。
    ═══════════════════════════════════════════════════════════════ */
 (() => {
@@ -137,6 +138,10 @@
      iching-text.js 按通行卦序存 [撮要, 卦辞, 大象, 彖辞, 六爻, 用辞]。 */
   const TEXT = Array.isArray(window.__ichingText) && window.__ichingText.length === 64
     ? window.__ichingText : null;
+  /* 白话今译与经文同序，字段见 iching-plain.js 文件头 */
+  const PLAIN = Array.isArray(window.__ichingPlain) && window.__ichingPlain.length === 64
+    ? window.__ichingPlain : null;
+  const plainOf = no => PLAIN ? PLAIN[no - 1] : null;
   const YAO_POS = ['初', '二', '三', '四', '五', '上'];
   const textOf = no => TEXT ? TEXT[no - 1] : null;
   function yaoTitle(i, yang) {
@@ -152,24 +157,26 @@
   function decide(rd) {
     const { ben, zhi, yaos, movingIdx } = rd;
     const bt = textOf(ben.no), zt = zhi ? textOf(zhi.no) : null;
+    const bp = plainOf(ben.no), zp = zhi ? plainOf(zhi.no) : null;
     const n = movingIdx.length;
     const still = [0, 1, 2, 3, 4, 5].filter(i => !movingIdx.includes(i));
-    const ci = (label, t) => ({ label, text: t ? t[1] : '' });
+    /* 每条断辞同时带上对应白话今译：卦辞取 ci，爻辞按卦序 + 爻位取 y[i] */
+    const ci = (label, t, p) => ({ label, text: t ? t[1] : '', plain: p ? p.ci : '' });
     const benYao = (i, main) => ({
       label: `${yaoTitle(i, yaos[i].yang)} · 本卦${YAO_NAMES[i]}${main ? '（主）' : ''}`,
-      text: bt ? bt[4][i] : '', main: !!main,
+      text: bt ? bt[4][i] : '', plain: bp ? bp.y[i] : '', main: !!main,
     });
     const zhiYao = (i, main) => {
       const yang = yaos[i].moving ? !yaos[i].yang : yaos[i].yang;
       return {
         label: `${yaoTitle(i, yang)} · 之卦${YAO_NAMES[i]}${main ? '（主）' : ''}`,
-        text: zt ? zt[4][i] : '', main: !!main,
+        text: zt ? zt[4][i] : '', plain: zp ? zp.y[i] : '', main: !!main,
       };
     };
     let rule, items;
     if (n === 0) {
       rule = '六爻皆不变 · 以本卦卦辞断';
-      items = [ci(`${ben.name} · 卦辞`, bt)];
+      items = [ci(`${ben.name} · 卦辞`, bt, bp)];
     } else if (n === 1) {
       rule = '一爻动 · 以本卦变爻爻辞断';
       items = [benYao(movingIdx[0], true)];
@@ -178,7 +185,7 @@
       items = [benYao(movingIdx[0]), benYao(movingIdx[1], true)];
     } else if (n === 3) {
       rule = '三爻动 · 本卦为贞、之卦为悔，兼参两卦卦辞';
-      items = [ci(`${ben.name} · 本卦卦辞`, bt), ci(`${zhi.name} · 之卦卦辞`, zt)];
+      items = [ci(`${ben.name} · 本卦卦辞`, bt, bp), ci(`${zhi.name} · 之卦卦辞`, zt, zp)];
     } else if (n === 4) {
       rule = '四爻动 · 以之卦两不变爻爻辞断，以下爻为主';
       items = [zhiYao(still[0], true), zhiYao(still[1])];
@@ -187,14 +194,14 @@
       items = [zhiYao(still[0], true)];
     } else if (bt && bt[5]) {
       rule = '六爻皆动 · 乾坤取「用九 / 用六」';
-      items = [{ label: ben.no === 1 ? '用九' : '用六', text: bt[5], main: true }];
+      items = [{ label: ben.no === 1 ? '用九' : '用六', text: bt[5], plain: bp ? bp.u : '', main: true }];
     } else {
       rule = '六爻皆动 · 以之卦卦辞断';
-      items = [ci(`${zhi.name} · 之卦卦辞`, zt)];
+      items = [ci(`${zhi.name} · 之卦卦辞`, zt, zp)];
     }
     return {
       rule, items,
-      note: '断辞只是读卦的入手处，仍须合本卦卦辞、大象与全卦形势通看。',
+      note: '上面先列经文原文，其后浅色一行是白话今译。断辞只是读卦的入手处，仍须合本卦卦辞、大象与全卦形势通看。',
     };
   }
 
@@ -302,23 +309,32 @@
       </div>
       <section class="gua-comm" id="gua-comm" aria-label="卦解">
         <div class="gc-head">
-          <h3>卦解</h3>
-          <span class="gc-src">经文据《周易》 · 已转简体</span>
+          <h3>白话卦解</h3>
+          <span class="gc-src">今译 · 依经文字面直译</span>
         </div>
-        <p class="gc-sum" id="gc-sum"></p>
+        <div class="gp-lead" id="gp-lead"></div>
+        <p class="gp-change" id="gp-change" hidden></p>
+        <details class="gc-fold gc-extra">
+          <summary>延伸 · 经义撮要与取象今释</summary>
+          <p class="gc-gist" id="gc-gist"></p>
+          <p class="gc-sum" id="gc-sum"></p>
+        </details>
         <div class="gc-cols">
           <div class="gc-block">
-            <span class="gc-k">卦辞</span>
+            <span class="gc-k">卦辞 · 原文</span>
             <p class="gc-text" id="gc-ci"></p>
+            <p class="gc-plain" id="gc-ci-plain"></p>
           </div>
           <div class="gc-block">
-            <span class="gc-k">象曰</span>
+            <span class="gc-k">象曰 · 原文</span>
             <p class="gc-text" id="gc-xiang"></p>
+            <p class="gc-plain" id="gc-xiang-plain"></p>
           </div>
         </div>
         <details class="gc-fold">
-          <summary>彖曰 · 解卦辞</summary>
+          <summary>彖曰 · 卦辞义理（原文）</summary>
           <p class="gc-text" id="gc-tuan"></p>
+          <p class="gc-fold-note">彖传是对卦辞的义理阐发，读时可对照上方「白话卦解」与卦辞今译。</p>
         </details>
         <div class="gc-verdict">
           <div class="gv-head">
@@ -329,13 +345,13 @@
           <p class="gv-note" id="gv-note"></p>
         </div>
         <details class="gc-fold">
-          <summary>六爻爻辞 · 全文</summary>
+          <summary>六爻爻辞 · 原文与白话</summary>
           <div class="gc-yaos" id="gc-yaos"></div>
         </details>
-        <p class="gc-footnote">断卦参朱熹《易学启蒙》变占之例。经文为原文，撮要与取象为今语，不作吉凶断语。</p>
+        <p class="gc-footnote">断卦参朱熹《易学启蒙》变占之例。卦辞、爻辞、彖、象为《周易》原文；白话卦解与逐条今译由今人依字面直译，供理解参考，义理以原文为准，不作吉凶断语。</p>
       </section>
       <div class="gua-foot">
-        <span class="gf-note">三枚铜钱六掷成卦 · 老阴老阳为动爻 · 卦解依《周易》经文</span>
+        <span class="gf-note">三枚铜钱六掷成卦 · 老阴老阳为动爻 · 白话今译依《周易》经文</span>
         <div class="gf-acts">
           <button type="button" class="chip-btn" id="gua-again">再起一卦</button>
           <button type="button" class="chip-btn accent" id="gua-daily">回到今日一卦</button>
@@ -399,15 +415,16 @@
     $('gr-sub').textContent = movingIdx.length
       ? `之卦「${rd.zhi.name}」　动爻：${movingIdx.map(i => YAO_NAMES[i]).join('、')}`
       : '六爻皆静 · 无之卦';
-    const txt = textOf(ben.no);
-    $('gr-read').textContent = txt ? txt[0] : `${rd.relation}。`;
+    const txt = textOf(ben.no), bp = plainOf(ben.no);
+    /* 结果卡首屏直接给白话：这一卦在讲什么、宜如何自处 */
+    $('gr-read').textContent = bp ? `${bp.g[1]}${bp.g[2]}` : (txt ? txt[0] : `${rd.relation}。`);
     $('gr-yi').textContent = '宜 · ' + rd.yi.join(' / ');
     $('gr-ji').textContent = '忌 · ' + rd.ji.join(' / ');
     $('coins-note').textContent = opts.daily ? '今日之卦 · 同日不更' : '三枚铜钱 · 六掷成卦';
     renderCommentary(rd, txt, decide(rd));
   }
 
-  /* ---------- 渲染：卦解（经文原文 + 变占断辞 + 六爻全文） ---------- */
+  /* ---------- 渲染：白话卦解 + 经文原文（逐条附今译）+ 变占断辞 ---------- */
   function node(tag, cls, text) {
     const el = document.createElement(tag);
     if (cls) el.className = cls;
@@ -415,9 +432,39 @@
     return el;
   }
   function renderCommentary(rd, txt, dc) {
+    const bp = plainOf(rd.ben.no);
+    const zp = rd.zhi ? plainOf(rd.zhi.no) : null;
+
+    /* 整卦白话卦解：卦象 / 卦义 / 自处 */
+    const lead = $('gp-lead');
+    lead.replaceChildren();
+    if (bp) {
+      const keys = ['卦象', '卦义', '自处'];
+      bp.g.forEach((s, i) => {
+        const row = node('div', 'gp-row');
+        row.append(node('span', 'gp-k', keys[i]), node('span', 'gp-v', s));
+        lead.appendChild(row);
+      });
+    } else {
+      lead.appendChild(node('p', 'gp-v', '白话今译未载入'));
+    }
+
+    /* 之卦白话：变了之后，讲的是另一种处境 */
+    const change = $('gp-change');
+    if (rd.zhi && zp) {
+      change.hidden = false;
+      change.textContent = `之卦「${rd.zhi.name}」· 变到这一境时：${zp.g[0]}${zp.g[2]}`;
+    } else {
+      change.hidden = true;
+      change.textContent = '';
+    }
+
+    $('gc-gist').textContent = txt ? `经义撮要 · ${txt[0]}` : '';
     $('gc-sum').textContent = `${rd.relation}。${rd.motion}${rd.turning}`;
     $('gc-ci').textContent = txt ? txt[1] : '经文未载入';
+    $('gc-ci-plain').textContent = bp ? bp.ci : '';
     $('gc-xiang').textContent = txt ? txt[2] : '';
+    $('gc-xiang-plain').textContent = bp ? bp.xiang : '';
     $('gc-tuan').textContent = txt ? txt[3] : '';
     $('gv-rule').textContent = dc.rule;
     $('gv-note').textContent = dc.note;
@@ -427,6 +474,7 @@
     dc.items.forEach(it => {
       const box = node('div', 'gv-item' + (it.main ? ' main' : ''));
       box.append(node('span', 'gv-label', it.label), node('p', 'gv-text', it.text || '—'));
+      if (it.plain) box.append(node('p', 'gv-plain', it.plain));
       items.appendChild(box);
     });
 
@@ -435,9 +483,12 @@
     for (let i = 5; i >= 0; i--) {
       const y = rd.yaos[i];
       const row = node('div', 'gc-yao' + (y.moving ? ' moving' : ''));
+      const body = node('div', 'gcy-body');
+      body.append(node('span', 'gcy-text', txt ? txt[4][i] : ''));
+      if (bp && bp.y[i]) body.append(node('span', 'gcy-plain', bp.y[i]));
       row.append(
         node('span', 'gcy-title', `${yaoTitle(i, y.yang)}${y.moving ? ' · 动' : ''}`),
-        node('span', 'gcy-text', txt ? txt[4][i] : '')
+        body
       );
       yaos.appendChild(row);
     }
@@ -533,9 +584,9 @@
   const today = dailyReading();
   $('gs-name').textContent = `${today.ben.name} · 第 ${today.ben.no} 卦`;
 
-  /* 暴露只读的起卦内核，方便回归脚本校验卦名与动爻，不污染播放器 */
+  /* 暴露只读的起卦内核，方便回归脚本校验卦名、动爻与今译，不污染播放器 */
   window.__iching = {
     TRIGRAMS, NAMES, ORDER, castHexagram, hexagramOf, changingOf, readingOf, dailyReading,
-    textOf, yaoTitle, decide, TEXT,
+    textOf, plainOf, yaoTitle, decide, TEXT, PLAIN,
   };
 })();
