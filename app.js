@@ -73,11 +73,36 @@ function setApiBase() {
   if (v !== null) { localStorage.setItem('ew_api', v.trim()); location.reload(); }
 }
 
-/* ---------- 页面切换 ---------- */
-document.querySelectorAll('#tabbar .tab').forEach(t => t.addEventListener('click', () => {
-  document.querySelectorAll('#tabbar .tab').forEach(x => x.classList.toggle('cur', x === t));
-  ['page-discover', 'page-search', 'page-mine'].forEach(id => $(id).hidden = id !== t.dataset.page);
-}));
+/* ---------- 页面切换（桌面顶栏 + 移动 tabbar） ---------- */
+function go(page) {
+  document.querySelectorAll('#tabbar .tab').forEach(x => x.classList.toggle('cur', x.dataset.page === page));
+  $('page-discover').hidden = page !== 'page-discover';
+  $('page-mine').hidden = page !== 'page-mine';
+  if (page === 'page-search') openSearchDrop(); else closeSearchDrop();
+}
+document.querySelectorAll('#tabbar .tab').forEach(t => t.addEventListener('click', () => go(t.dataset.page)));
+$('nav-home').addEventListener('click', () => go('page-discover'));
+$('nav-mine').addEventListener('click', () => go('page-mine'));
+
+/* ---------- 搜索浮层 ---------- */
+function openSearchDrop() {
+  const d = $('page-search');
+  if (d.hidden) { d.hidden = false; requestAnimationFrame(() => d.classList.add('show')); }
+  $('search-input').focus();
+}
+function closeSearchDrop() {
+  const d = $('page-search');
+  if (d.hidden) return;
+  d.classList.remove('show');
+  setTimeout(() => { d.hidden = true; }, 240);
+}
+$('search-pill').addEventListener('click', () => { openSearchDrop(); $('search-input').focus(); });
+document.addEventListener('click', (e) => {
+  const d = $('page-search');
+  if (d.hidden || isMobile()) return;
+  if (!d.contains(e.target) && !$('search-pill').contains(e.target)) closeSearchDrop();
+});
+function isMobile() { return matchMedia('(max-width: 899px)').matches; }
 
 /* ---------- 氛围视觉 ---------- */
 const canvas = $('ambient');
@@ -113,6 +138,146 @@ function drawAmbient(t) {
 }
 requestAnimationFrame(drawAmbient);
 
+/* ---------- 墨染场：封面取色 → 水墨晕染粒子 ---------- */
+const inkStage = $('stage');
+const inkCanvas = $('ink');
+const inkCtx = inkCanvas.getContext('2d');
+/* main/sub/glow 供墨晕画布忠实呈现封面色；acc/accGlow 供 UI 强调色，
+   始终以琥珀为底并保住明度，避免封面过暗时按钮、歌词、光圈一起发灰 */
+const INK_BASE = {
+  main: [230, 176, 106], sub: [143, 184, 174], glow: [242, 201, 138],
+  acc: [230, 176, 106], accGlow: [242, 201, 138],
+};
+const inkClone = (p) => Object.fromEntries(Object.entries(p).map(([k, v]) => [k, [...v]]));
+let inkCur = inkClone(INK_BASE);       // 当前色（逐帧缓动，换歌不跳色）
+let inkTarget = inkClone(INK_BASE);    // 封面目标色
+const inkCss = { glow: '242,201,138' };
+let inkBlobs = [], inkSpecks = [], inkFrame = 0;
+
+function resizeInk() {
+  const w = inkStage.clientWidth || innerWidth;
+  const h = inkStage.clientHeight || innerHeight;
+  // 低分辨率绘制 + CSS 模糊 = 柔和水墨边缘，同时省 GPU
+  inkCanvas.width = Math.max(1, Math.round(w * .38));
+  inkCanvas.height = Math.max(1, Math.round(h * .38));
+  inkBlobs = Array.from({ length: 14 }, (_, i) => ({
+    x: Math.random(), y: Math.random(),
+    r: .13 + Math.random() * .26,
+    vx: (Math.random() - .5) * .00018,
+    vy: -(0.00005 + Math.random() * .00013),
+    a: .10 + Math.random() * .16,
+    c: i % 4 === 0 ? 'sub' : 'main',
+    ph: Math.random() * 6.283,
+  }));
+  inkSpecks = Array.from({ length: 38 }, () => ({
+    x: Math.random(), y: Math.random(),
+    r: .0018 + Math.random() * .004,
+    vx: (Math.random() - .5) * .00022,
+    vy: -(0.0001 + Math.random() * .00028),
+    a: .12 + Math.random() * .32,
+    ph: Math.random() * 6.283,
+  }));
+}
+function ensureInkSize() {
+  if (inkStage.hidden) return;
+  const w = Math.max(1, Math.round((inkStage.clientWidth || innerWidth) * .38));
+  const h = Math.max(1, Math.round((inkStage.clientHeight || innerHeight) * .38));
+  if (inkCanvas.width !== w || inkCanvas.height !== h) resizeInk();
+}
+addEventListener('resize', ensureInkSize);
+
+function drawInk(t) {
+  requestAnimationFrame(drawInk);
+  if (!inkCanvas.width) resizeInk();
+  if (inkStage.hidden || document.hidden) return;
+  // 换歌时颜色缓动过渡
+  for (const k in inkCur) {
+    for (let i = 0; i < 3; i++) inkCur[k][i] += (inkTarget[k][i] - inkCur[k][i]) * .05;
+  }
+  if (++inkFrame % 4 === 0) {
+    inkStage.style.setProperty('--ink-rgb', inkCur.acc.map(v => Math.round(v)).join(','));
+    inkStage.style.setProperty('--ink-glow-rgb', inkCur.accGlow.map(v => Math.round(v)).join(','));
+    inkCss.glow = inkCur.accGlow.map(v => Math.round(v)).join(',');
+  }
+  const W = inkCanvas.width, H = inkCanvas.height;
+  const beat = state.playing ? (state.level || 0) : 0;
+  inkCtx.clearRect(0, 0, W, H);
+  inkCtx.globalCompositeOperation = 'screen';
+  // 大墨晕：缓慢上浮、正弦呼吸、随节拍舒张
+  for (const b of inkBlobs) {
+    b.x += b.vx; b.y += b.vy;
+    if (b.y < -.4) { b.y = 1.4; b.x = Math.random(); }
+    if (b.x < -.4) b.x = 1.4;
+    if (b.x > 1.4) b.x = -.4;
+    const breathe = 1 + Math.sin(t / 2700 + b.ph) * .13 + beat * .09;
+    const cx = b.x * W, cy = b.y * H, r = b.r * W * breathe;
+    const c = inkCur[b.c];
+    const rgb = `${c[0] | 0},${c[1] | 0},${c[2] | 0}`;
+    const alpha = b.a * (state.playing ? .9 + beat * .55 : .72);
+    const g = inkCtx.createRadialGradient(cx, cy, 0, cx, cy, r);
+    g.addColorStop(0, `rgba(${rgb},${alpha})`);
+    g.addColorStop(.42, `rgba(${rgb},${alpha * .4})`);
+    g.addColorStop(1, `rgba(${rgb},0)`);
+    inkCtx.fillStyle = g;
+    inkCtx.beginPath(); inkCtx.arc(cx, cy, r, 0, 6.2832); inkCtx.fill();
+  }
+  // 细墨点：浮尘般的微光
+  const gc = inkCur.accGlow, grgb = `${gc[0] | 0},${gc[1] | 0},${gc[2] | 0}`;
+  for (const s of inkSpecks) {
+    s.x += s.vx; s.y += s.vy;
+    if (s.y < -.02) { s.y = 1.02; s.x = Math.random(); }
+    const tw = .55 + Math.sin(t / 1500 + s.ph) * .45;
+    inkCtx.fillStyle = `rgba(${grgb},${s.a * tw})`;
+    inkCtx.beginPath();
+    inkCtx.arc(s.x * W, s.y * H, Math.max(.8, s.r * W * (1 + beat * .4)), 0, 6.2832);
+    inkCtx.fill();
+  }
+  inkCtx.globalCompositeOperation = 'source-over';
+}
+requestAnimationFrame(drawInk);
+
+/* 从封面代理图提取主色（同源，可读像素），混入琥珀以保持国风墨色基调 */
+function paintFromCover(src) {
+  if (!src) { inkTarget = inkClone(INK_BASE); return; }
+  const img = new Image();
+  img.onload = () => {
+    try {
+      const c = document.createElement('canvas');
+      c.width = c.height = 20;
+      const cx = c.getContext('2d', { willReadFrequently: true });
+      cx.drawImage(img, 0, 0, 20, 20);
+      const d = cx.getImageData(0, 0, 20, 20).data;
+      let rs = 0, gs = 0, bs = 0, n = 0, best = null, bestScore = -1;
+      for (let i = 0; i < d.length; i += 4) {
+        const r = d[i], g = d[i + 1], b = d[i + 2];
+        if (d[i + 3] < 40) continue;
+        const mx = Math.max(r, g, b), mn = Math.min(r, g, b);
+        const lum = r * .299 + g * .587 + b * .114;
+        if (lum < 20 || lum > 238) continue;
+        rs += r; gs += g; bs += b; n++;
+        const score = (mx - mn) * (1 - Math.abs(lum - 150) / 150);
+        if (score > bestScore) { bestScore = score; best = [r, g, b]; }
+      }
+      if (!n) return;
+      let main = [rs / n, gs / n, bs / n].map((v, i) => v * .6 + INK_BASE.main[i] * .4);
+      const lum = main[0] * .299 + main[1] * .587 + main[2] * .114;
+      if (lum > 178) main = main.map(v => v * 178 / lum);
+      else if (lum < 60) main = main.map(v => Math.min(255, v * 1.25));
+      const glow = main.map((v, i) => Math.min(255, v * .5 + INK_BASE.glow[i] * .5));
+      const sub = best
+        ? best.map((v, i) => v * .58 + INK_BASE.sub[i] * .42)
+        : [...INK_BASE.sub];
+      // UI 强调色：七成琥珀 + 三成封面，明度不足则整体提亮，保证按钮与歌词始终点睛
+      let acc = main.map((v, i) => v * .3 + INK_BASE.main[i] * .7);
+      const alum = acc[0] * .299 + acc[1] * .587 + acc[2] * .114;
+      if (alum < 175) acc = acc.map(v => Math.min(255, v * 175 / alum));
+      const accGlow = acc.map((v, i) => Math.min(255, v * .45 + INK_BASE.glow[i] * .55));
+      inkTarget = { main, sub, glow, acc, accGlow };
+    } catch (e) { /* 图片不可读时保持当前色 */ }
+  };
+  img.src = src;
+}
+
 /* ---------- 频谱可视化（Web Audio，复刻原版 02-visual/03-beat） ---------- */
 let audioCtx = null, analyser = null, freqData = null;
 function ensureAudioGraph() {
@@ -147,8 +312,8 @@ function drawSpectrum() {
     sum += v;
     const h = Math.max(2, v * spCanvas.height * .9);
     const grad = spCtx.createLinearGradient(0, spCanvas.height, 0, spCanvas.height - h);
-    grad.addColorStop(0, 'rgba(230,176,106,.15)');
-    grad.addColorStop(1, `rgba(230,176,106,${.25 + v * .6})`);
+    grad.addColorStop(0, `rgba(${inkCss.glow},.15)`);
+    grad.addColorStop(1, `rgba(${inkCss.glow},${.25 + v * .6})`);
     spCtx.fillStyle = grad;
     spCtx.fillRect(i * w + w * .18, spCanvas.height - h, w * .64, h);
   }
@@ -192,24 +357,49 @@ function logout() {
   api('/api/logout').then(refreshLoginStatus);
 }
 
-/* ---------- 发现页 ---------- */
+/* ---------- 发现页（bento） ---------- */
+function setQuote() { $('poem-line').textContent = POEMS[Math.floor(Math.random() * POEMS.length)]; }
+function updateContinueCard() {
+  const saved = state.queue[state.index];
+  const daily = state.daily || [];
+  if (saved) {
+    $('bc-kicker').textContent = 'CONTINUE · 继续听';
+    $('hero-cover').src = coverUrl(saved.cover) || 'icon.svg';
+    $('hero-name').textContent = saved.name;
+    $('hero-artist').textContent = saved.artist + ' · 上次听到这里';
+    $('hero-play').onclick = (e) => { e.stopPropagation(); playIndex(state.index); };
+  } else if (daily.length) {
+    const first = daily[0];
+    $('bc-kicker').textContent = 'DAILY · 今日推荐';
+    $('hero-cover').src = coverUrl(first.cover) || 'icon.svg';
+    $('hero-name').textContent = first.name;
+    $('hero-artist').textContent = first.artist + (first.album ? ' · ' + first.album : '');
+    $('hero-play').onclick = (e) => { e.stopPropagation(); state.queue = daily.slice(); renderQueue(); playIndex(0); };
+  } else return;
+  $('bento-continue').onclick = () => $('hero-play').click();
+  tintHomeCover($('hero-cover').src);
+}
+function renderNextUp() {
+  const next = state.queue[state.index + 1] || state.queue[0];
+  if (!next) { $('nu-name').textContent = '队列里还没有歌曲'; $('nu-sub').textContent = '点开一首试试耳朵'; $('nu-cover').style.backgroundImage = ''; return; }
+  $('nu-name').textContent = next.name;
+  $('nu-sub').textContent = next.artist + (state.queue.length > 1 ? ` · 共 ${state.queue.length} 首` : '');
+  $('nu-cover').style.backgroundImage = next.cover ? `url(${coverUrl(next.cover)})` : '';
+}
 async function loadDiscover() {
-  $('poem-line').textContent = POEMS[Math.floor(Math.random() * POEMS.length)];
+  setQuote();
   try {
     const d = await api('/api/discover/home');
     const daily = d.dailySongs || [];
+    state.daily = daily;
+    updateContinueCard();
     if (daily.length) {
-      $('daily-hero').hidden = false; $('daily-rail-section').hidden = false;
-      const first = daily[0];
-      $('hero-cover').src = coverUrl(first.cover);
-      $('hero-name').textContent = first.name;
-      $('hero-artist').textContent = first.artist + (first.album ? ' · ' + first.album : '');
-      $('hero-play').onclick = () => { state.queue = daily.slice(); renderQueue(); playIndex(0); };
-      $('daily-hero').onclick = () => $('hero-play').click();
+      $('daily-rail-section').hidden = false;
       const rail = $('daily-rail'); rail.innerHTML = '';
-      daily.slice(0, 20).forEach(s => {
+      daily.slice(0, 20).forEach((s, i) => {
         const el = document.createElement('div');
         el.className = 'rail-card';
+        el.style.setProperty('--i', String(Math.min(i, 12)));
         el.innerHTML = `<img src="${coverUrl(s.cover)}" loading="lazy" alt=""><div class="rc-name">${escapeHtml(s.name)}</div><div class="rc-sub">${escapeHtml(s.artist)}</div>`;
         el.onclick = () => { state.queue = daily.slice(); renderQueue(); playIndex(daily.indexOf(s)); };
         rail.appendChild(el);
@@ -219,9 +409,10 @@ async function loadDiscover() {
     if (pls.length) {
       $('pl-grid-section').hidden = false;
       const grid = $('pl-grid'); grid.innerHTML = '';
-      pls.forEach(p => {
+      pls.slice(0, 6).forEach((p, i) => {
         const el = document.createElement('div');
         el.className = 'pl-cell';
+        el.style.setProperty('--i', String(i));
         el.innerHTML = `<img src="${coverUrl(p.cover)}" loading="lazy" alt=""><div class="pc-name">${escapeHtml(p.name)}</div><div class="pc-sub">${escapeHtml(p.tag || '')} · ${p.trackCount || 0}首</div>`;
         el.onclick = () => openPlaylist(p.id);
         grid.appendChild(el);
@@ -229,12 +420,36 @@ async function loadDiscover() {
     }
   } catch (e) { console.warn('discover', e); }
 }
+/* bento 交互 */
+$('poem-shuffle').addEventListener('click', setQuote);
+$('daily-play').addEventListener('click', () => {
+  const daily = state.daily || [];
+  if (!daily.length) return;
+  if (state.queue[0] && state.queue[0].__daily) return playIndex(0);
+  state.queue = daily.slice(); state.queue.forEach(s => s.__daily = true);
+  renderQueue(); playIndex(0);
+});
+$('hero-shuffle').addEventListener('click', (e) => {
+  e.stopPropagation();
+  const daily = state.daily || [];
+  if (!daily.length) return;
+  state.queue = daily.slice(); renderQueue();
+  playIndex(Math.floor(Math.random() * daily.length));
+});
+$('bento-daily').addEventListener('click', () => $('daily-play').click());
+$('bento-library').addEventListener('click', () => go('page-mine'));
+$('bento-recent').addEventListener('click', () => {
+  if (state.queue.length) playIndex(state.index >= 0 ? state.index : 0);
+});
+$('bento-nextup').addEventListener('click', openQueue);
 
 /* ---------- 歌单 ---------- */
 async function loadMyPlaylists() {
   try {
     const d = await api('/api/user/playlists');
     const list = $('my-playlists'); list.innerHTML = '';
+    const n = (d.playlists || []).length;
+    $('lib-sub').textContent = n ? `${n} 张歌单 · 已同步` : '登录后同步歌单';
     (d.playlists || []).forEach(p => {
       const el = document.createElement('div');
       el.className = 'pl-row';
@@ -336,7 +551,9 @@ async function doSearch(kw, append) {
       : '/api/search';
     const data = await api(`${ep}?keywords=${encodeURIComponent(kw)}&limit=20&offset=${state.offset}`);
     if (data.error === 'NEED_LOGIN') {
-      $('results').innerHTML = `<div class="song"><div class="meta"><div class="name">需要登录 ${state.provider === 'xy' ? '小宇宙' : ''}</div><div class="artist">${escapeHtml(data.message || '请先登录该平台')}</div></div></div>`;
+      const isXY = state.provider === 'xy';
+      $('results').innerHTML = `<div class="song xy-need"><div class="meta"><div class="name">${isXY ? '小宇宙登录已失效' : '需要登录'}</div><div class="artist">${escapeHtml(data.message || '请先登录该平台')}</div></div>${isXY ? '<button class="brush-btn solid" id="results-login">去登录</button>' : ''}</div>`;
+      if (isXY) $('results-login').onclick = () => openLogin('xy');
       $('more-btn-wrap').hidden = true;
       return;
     }
@@ -389,6 +606,7 @@ function renderQueue() {
     if (i === state.index) el.classList.add('playing');
     box.appendChild(el);
   });
+  renderNextUp();
   saveState();
 }
 async function playIndex(i) {
@@ -405,6 +623,7 @@ async function playIndex(i) {
   $('mini-cover').src = cv || 'icon.svg';
   $('stage-cover').src = cv || 'icon.svg';
   $('stage-bg').style.backgroundImage = cv ? `url(${cv})` : 'none';
+  paintFromCover(cv || '');
   $('fee-badge').hidden = s.fee !== 1;
   $('quality-badge').hidden = true;
   loadLyrics(s);
@@ -448,6 +667,7 @@ async function playIndex(i) {
       audio.currentTime = seek; audio.removeEventListener('loadedmetadata', once);
     }, { once: true });
     audio.play();
+    bumpStats(s);
     saveState();
   } catch (err) {
     $('mini-artist').textContent = '⚠ ' + err.message;
@@ -459,6 +679,7 @@ function setPlayingUI(p) {
   $('play-icon').textContent = p ? '❚❚' : '▶';
   $('mini-icon').textContent = p ? '❚❚' : '▶';
   $('stage').classList.toggle('paused', !p);
+  $('mini').classList.toggle('paused', !p);
 }
 function toggle() { if (!audio.src) return; audio.paused ? audio.play() : audio.pause(); }
 audio.addEventListener('play', () => { setPlayingUI(true); saveState(); });
@@ -473,7 +694,9 @@ audio.addEventListener('timeupdate', () => {
   $('t-cur').textContent = fmt(c); $('t-dur').textContent = fmt(d);
   $('seek').value = d ? Math.round(c / d * 1000) : 0;
   $('mini-progress').firstElementChild.style.width = d ? (c / d * 100) + '%' : '0';
+  $('bar-time').textContent = fmt(c) + ' / ' + fmt(d);
   syncLyric(c);
+  tickStats();
   if (Math.floor(c) % 5 === 0) saveState();
 });
 $('seek').addEventListener('input', (e) => { if (audio.duration) audio.currentTime = e.target.value / 1000 * audio.duration; });
@@ -505,14 +728,23 @@ function restoreState() {
       $('mini-artist').textContent = cur.artist + ' · 继续听';
       const cv = coverUrl(cur.cover);
       $('mini-cover').src = cv || 'icon.svg';
+      $('stage-cover').src = cv || 'icon.svg';
+      $('stage-bg').style.backgroundImage = cv ? `url(${cv})` : 'none';
+      $('stage-name').textContent = cur.name;
+      $('stage-artist').textContent = cur.artist;
+      paintFromCover(cv || '');
       $('mini-toggle').addEventListener('click', () => playIndex(state.index), { once: true });
+      $('recent-sub').textContent = cur.name;
+      updateContinueCard();
     }
   } catch { /* ignore */ }
 }
 
 /* ---------- 播放模式 ---------- */
 function applyMode() {
-  $('mode-icon').textContent = state.mode === 'one' ? '⟳' : state.mode === 'shuffle' ? '⤨' : '⇉';
+  const ico = state.mode === 'one' ? '⟳' : state.mode === 'shuffle' ? '⤨' : '⇉';
+  $('mode-icon').textContent = ico;
+  const sm = $('stage-mode-icon'); if (sm) sm.textContent = ico;
   localStorage.setItem('ew_mode', state.mode);
 }
 $('mode-btn').addEventListener('click', () => {
@@ -584,11 +816,25 @@ $('like-btn').addEventListener('click', toggleLike);
 $('mini-like').addEventListener('click', (e) => { e.stopPropagation(); toggleLike(); });
 
 /* ---------- 播放页开关 ---------- */
-function openStage() { $('stage').hidden = false; requestAnimationFrame(() => $('stage').classList.add('show')); }
-function closeStage() { $('stage').classList.remove('show'); setTimeout(() => { $('stage').hidden = true; }, 400); }
+function openStage() {
+  $('stage').hidden = false;
+  requestAnimationFrame(() => { $('stage').classList.add('show'); ensureInkSize(); });
+}
+function closeStage() { $('stage').classList.remove('show'); setTimeout(() => { $('stage').hidden = true; }, 420); }
 $('mini-expand').addEventListener('click', (e) => { e.stopPropagation(); openStage(); });
-$('mini').addEventListener('click', openStage);
+$('bar-lyric').addEventListener('click', (e) => { e.stopPropagation(); openStage(); });
+$('mini-cover').addEventListener('click', (e) => { e.stopPropagation(); openStage(); });
+$('mini-meta').addEventListener('click', (e) => { e.stopPropagation(); openStage(); });
+$('prev').addEventListener('click', (e) => e.stopPropagation());
+$('next').addEventListener('click', (e) => e.stopPropagation());
+$('mini-toggle').addEventListener('click', (e) => e.stopPropagation());
+$('bar-vol').addEventListener('click', (e) => e.stopPropagation());
 $('stage-close').addEventListener('click', closeStage);
+/* 舞台内的复用控件（与播放条同源状态） */
+$('stage-prev').addEventListener('click', () => playIndex(state.index - 1));
+$('stage-next').addEventListener('click', () => playIndex(state.index + 1));
+$('stage-mode').addEventListener('click', () => $('mode-btn').click());
+$('stage-queue').addEventListener('click', openQueue);
 
 /* ---------- 队列抽屉 ---------- */
 function openQueue() {
@@ -727,8 +973,10 @@ function switchLoginTab(lp) {
   $('login-tabs').querySelectorAll('.login-tab').forEach(b => b.classList.toggle('cur', b.dataset.lp === lp));
   ['netease', 'qishui', 'qq', 'xy'].forEach(p => { $('lp-' + p).hidden = p !== lp; });
   if (lp === 'netease') startQrLogin();
-  if (lp === 'qishui') checkQishuiStatus();
-  if (lp === 'qq') checkQQStatus();
+  if (lp === 'qishui') { checkQishuiStatus(); if (!qishuiQrTimer && !qishuiQrToken) startQishuiQr(); }
+  else stopQishuiQrPoll();
+  if (lp === 'qq') { checkQQStatus(); refreshQQVipStatus(); if (!qqQrTimer && !qqQrId) startQQQr(); }
+  else stopQQQrPoll();
   if (lp === 'xy') checkXYStatus();
 }
 async function startQrLogin() {
@@ -742,26 +990,152 @@ async function startQrLogin() {
     pollQr();
   } catch (err) { $('qr-status').textContent = '⚠ ' + err.message; }
 }
-async function openLogin() {
+async function openLogin(lp) {
   $('login-modal').hidden = false;
-  switchLoginTab('netease');
+  switchLoginTab(typeof lp === 'string' ? lp : 'netease');
+}
+let qishuiQrToken = '', qishuiQrTimer = null;
+function stopQishuiQrPoll() {
+  if (qishuiQrTimer) { clearInterval(qishuiQrTimer); qishuiQrTimer = null; }
 }
 async function checkQishuiStatus() {
   const st = $('qishui-cookie-status');
   st.textContent = '查询登录态……';
   try {
     const r = await api('/api/qishui/status');
-    st.textContent = r.loggedIn ? `✓ 已登录：${r.nickname || r.userId}（${r.vipLabel || r.vipLevel || ''}）` : '未登录，粘贴 cookie 后点「登录」';
+    st.textContent = r.loggedIn
+      ? `✓ 已登录：${r.nickname || r.userId}（${r.vipLabel || r.vipLevel || ''}）`
+      : (r.qrAvailable ? '未登录，用抖音 App 扫上面的二维码' : '未登录；当前机器没有 Chrome / Electron，请用下方手动粘贴 cookie');
   } catch (e) { st.textContent = '⚠ ' + e.message; }
 }
+
+/* 抖音 App 扫码：二维码由服务端签名引擎生成，前端只负责展示与轮询 */
+async function startQishuiQr() {
+  stopQishuiQrPoll();
+  const qrSt = $('qishui-qr-status'), img = $('qishui-qr-img'), btn = $('qishui-qr-refresh');
+  btn.disabled = true; img.hidden = true;
+  qrSt.textContent = '正在生成二维码（首次要启动本机浏览器内核，约 5–15 秒）……';
+  try {
+    const r = await api('/api/qishui/login/qrcode', { method: 'POST' });
+    if (!r.ok || !r.qrcode) { qrSt.textContent = '⚠ ' + (r.error || '二维码生成失败'); btn.disabled = false; return; }
+    qishuiQrToken = r.token;
+    img.src = r.qrcode; img.hidden = false; btn.disabled = false;
+    qrSt.textContent = '请用抖音 App 扫码，并在手机上确认';
+    qishuiQrTimer = setInterval(async () => {
+      if (!qishuiQrToken || $('login-modal').hidden) { stopQishuiQrPoll(); return; }
+      try {
+        const c = await api('/api/qishui/login/check?token=' + encodeURIComponent(qishuiQrToken));
+        if (!c.ok) return;
+        const s = String(c.status || '');
+        if (c.confirmed) {
+          stopQishuiQrPoll(); qishuiQrToken = '';
+          qrSt.textContent = '✓ 登录成功，凭据已存到本机';
+          checkQishuiStatus(); refreshLoginStatus();
+        } else if (s === '3' || s === 'confirmed') qrSt.textContent = '已确认，正在写入凭据……';
+        else if (s === '2' || s === 'scanned') qrSt.textContent = '已扫码，请在手机上点确认';
+        else if (Number(c.error_code) === 2 || s === 'expired') {
+          stopQishuiQrPoll(); qishuiQrToken = '';
+          qrSt.textContent = '二维码已过期，点「生成 / 刷新二维码」重试';
+        } else qrSt.textContent = '等待扫码…';
+      } catch { /* 网络抖动忽略 */ }
+    }, 2500);
+  } catch (e) { qrSt.textContent = '⚠ ' + e.message; btn.disabled = false; }
+}
+$('qishui-qr-refresh').addEventListener('click', startQishuiQr);
+$('qishui-qr-clear').addEventListener('click', () => {
+  stopQishuiQrPoll(); qishuiQrToken = '';
+  api('/api/qishui/logout').then(() => {
+    $('qishui-qr-img').hidden = true;
+    $('qishui-qr-status').textContent = '点上面按钮生成二维码';
+    $('qishui-cookie-status').textContent = '已退出';
+    refreshLoginStatus();
+  });
+});
 async function checkQQStatus() {
   const st = $('qq-cookie-status');
   st.textContent = '查询登录态……';
   try {
     const r = await api('/api/qq/status');
-    st.textContent = r.loggedIn ? `✓ 已登录：${r.nickname || r.uin}` : '未登录，粘贴 cookie 后点「登录」（VIP 歌曲需登录）';
+    const auth = r.authorization || {};
+    st.textContent = r.loggedIn
+      ? `✓ 已登录：${r.nickname || r.uin} · ${auth.label || '播放授权已保存'}`
+      : '未登录，扫码后自动保存凭据（VIP 歌曲需登录）';
   } catch (e) { st.textContent = '⚠ ' + e.message; }
 }
+
+/* QQ 音乐：三条扫码通道（手机 QQ / 微信 / QQ 音乐 App），凭据由服务端换取并落盘 */
+let qqQrChannel = 'qq', qqQrId = '', qqQrTimer = null, qqQrBusy = false;
+function stopQQQrPoll() {
+  if (qqQrTimer) { clearInterval(qqQrTimer); qqQrTimer = null; }
+  qqQrBusy = false;
+}
+async function refreshQQVipStatus() {
+  const box = $('qq-vip-status');
+  box.classList.remove('ready');
+  box.textContent = '正在检查 VIP 播放授权…';
+  try {
+    const r = await api('/api/qq/playback/auth');
+    if (!r.loggedIn) {
+      box.textContent = 'VIP 播放授权 · 未登录。扫码成功后会自动换取播放密钥，解锁 VIP / 无损曲目。';
+      return;
+    }
+    const who = r.uin ? ` · uin ${r.uin}` : '';
+    const vip = r.vipKnown ? ` · ${r.vipLabel}` : ' · 会员态待确认';
+    box.classList.add('ready');
+    box.innerHTML = `<b>VIP 播放授权已就绪</b>${who}${vip}<br>${escapeHtml(r.hint || '')}`;
+  } catch (e) { box.textContent = '⚠ 授权状态查询失败：' + e.message; }
+}
+async function startQQQr() {
+  stopQQQrPoll();
+  const st = $('qq-qr-status'), img = $('qq-qr-img'), btn = $('qq-qr-refresh');
+  btn.disabled = true; img.hidden = true;
+  st.textContent = '正在生成二维码…';
+  try {
+    const r = await api('/api/qq/qr/create', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ channel: qqQrChannel }),
+    });
+    if (!r.ok || !r.qrcode) { st.textContent = '⚠ ' + (r.error || '二维码生成失败'); btn.disabled = false; return; }
+    qqQrId = r.id;
+    img.src = r.qrcode; img.hidden = false; btn.disabled = false;
+    st.textContent = r.hint || '请用对应 App 扫码并在手机上确认';
+    qqQrTimer = setInterval(async () => {
+      if (!qqQrId || $('login-modal').hidden || qqQrBusy) { if (!qqQrId) stopQQQrPoll(); return; }
+      qqQrBusy = true;
+      try {
+        const c = await api(`/api/qq/qr/check?channel=${encodeURIComponent(qqQrChannel)}&id=${encodeURIComponent(qqQrId)}`);
+        if (!c.ok) { st.textContent = '⚠ ' + (c.message || c.error || '状态查询失败'); return; }
+        if (c.confirmed) {
+          stopQQQrPoll(); qqQrId = '';
+          st.textContent = '✓ 登录成功，凭据与播放授权已存到本机';
+          img.hidden = true;
+          checkQQStatus(); refreshQQVipStatus(); refreshLoginStatus();
+          return;
+        }
+        st.textContent = c.message || '等待扫码…';
+        if (c.status === 'expired' || c.status === 'canceled') { stopQQQrPoll(); qqQrId = ''; }
+      } catch { /* 网络抖动忽略 */ }
+      finally { qqQrBusy = false; }
+    }, 2500);
+  } catch (e) { st.textContent = '⚠ ' + e.message; btn.disabled = false; }
+}
+$('qq-channels').querySelectorAll('.qq-channel').forEach(b => b.addEventListener('click', () => {
+  qqQrChannel = b.dataset.qqChannel || 'qq';
+  $('qq-channels').querySelectorAll('.qq-channel').forEach(x => x.classList.toggle('cur', x === b));
+  qqQrId = ''; startQQQr();
+}));
+$('qq-qr-refresh').addEventListener('click', () => { qqQrId = ''; startQQQr(); });
+$('qq-qr-clear').addEventListener('click', () => {
+  stopQQQrPoll(); qqQrId = '';
+  api('/api/qq/logout').then(() => {
+    $('qq-qr-img').hidden = true;
+    $('qq-qr-status').textContent = '点「生成 / 刷新二维码」重新扫码';
+    $('qq-cookie-status').textContent = '已退出';
+    $('qq-vip-status').classList.remove('ready');
+    $('qq-vip-status').textContent = 'VIP 播放授权 · 未登录';
+    refreshLoginStatus();
+  });
+});
 $('login-tabs').querySelectorAll('.login-tab').forEach(b => b.addEventListener('click', () => switchLoginTab(b.dataset.lp)));
 $('qishui-cookie-save').addEventListener('click', async () => {
   const st = $('qishui-cookie-status');
@@ -770,10 +1144,10 @@ $('qishui-cookie-save').addEventListener('click', async () => {
   st.textContent = '保存中……';
   try {
     const r = await api('/api/qishui/login/cookie', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ cookie: c }) });
-    st.textContent = r.loggedIn ? '✓ 登录成功' : '⚠ cookie 无效或不含登录态';
+    st.textContent = r.loggedIn ? '✓ 凭据已保存' : '⚠ cookie 无效或不含登录态';
+    if (r.loggedIn) refreshLoginStatus();
   } catch (e) { st.textContent = '⚠ ' + e.message; }
 });
-$('qishui-cookie-clear').addEventListener('click', () => api('/api/qishui/logout').then(() => { $('qishui-cookie-status').textContent = '已退出'; }));
 $('qq-cookie-save').addEventListener('click', async () => {
   const st = $('qq-cookie-status');
   const c = $('qq-cookie-input').value.trim();
@@ -782,29 +1156,90 @@ $('qq-cookie-save').addEventListener('click', async () => {
   try {
     const r = await api('/api/qq/login/cookie', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ cookie: c }) });
     st.textContent = r.loggedIn ? `✓ 登录成功：${r.nickname || r.uin}` : '⚠ cookie 无效或不含 uin/qm_keyst';
+    if (r.loggedIn) { refreshQQVipStatus(); refreshLoginStatus(); }
   } catch (e) { st.textContent = '⚠ ' + e.message; }
 });
-$('qq-cookie-clear').addEventListener('click', () => api('/api/qq/logout').then(() => { $('qq-cookie-status').textContent = '已退出'; }));
+const xyStatus = () => $('xy-token-status');
+const xyCreds = () => ({ areaCode: $('xy-area').value, mobilePhoneNumber: $('xy-phone').value.trim() });
+const xyPost = (path, body) => api(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+
 async function checkXYStatus() {
-  const st = $('xy-token-status');
+  const st = xyStatus();
   st.textContent = '查询登录态……';
   try {
     const r = await api('/api/xy/status');
-    st.textContent = r.loggedIn ? '✓ 已登录' + (r.nickname ? '：' + r.nickname : '') : '未登录，粘贴 token 后点「登录」';
+    if (!r.loggedIn) { st.textContent = '未登录，填手机号收验证码后点「登录并保存」'; return; }
+    const mins = r.at ? Math.floor((Date.now() - r.at) / 60000) : null;
+    const age = mins === null ? '' : mins < 1 ? '（刚刚获取）' : mins < 60 ? `（${mins} 分钟前）` : `（约 ${Math.floor(mins / 60)} 小时前）`;
+    const who = r.nickname || r.phone || '';
+    const via = r.via === 'sms' ? '短信登录' : '手动凭据';
+    st.textContent = '✓ 已登录' + (who ? '：' + who : '') + ' · ' + via + age;
   } catch (e) { st.textContent = '⚠ ' + e.message; }
 }
+
+$('xy-open-official').addEventListener('click', () => window.open('https://www.xiaoyuzhoufm.com/', '_blank', 'noopener,noreferrer'));
+
+let xySendTimer = null;
+$('xy-send').addEventListener('click', async () => {
+  const btn = $('xy-send'), st = xyStatus();
+  const creds = xyCreds();
+  if (!creds.mobilePhoneNumber) { st.textContent = '⚠ 请先填手机号'; return; }
+  btn.disabled = true; st.textContent = '正在请求发送验证码……';
+  try {
+    const r = await xyPost('/api/xy/login/send-code', creds);
+    if (r.ok) {
+      st.textContent = '✓ ' + (r.message || '验证码已发送') + '，收到后填到上面';
+      $('xy-captcha-tip').hidden = true;
+      let left = 60;
+      btn.textContent = left + 's 后重发';
+      clearInterval(xySendTimer);
+      xySendTimer = setInterval(() => {
+        if (--left <= 0) { clearInterval(xySendTimer); btn.textContent = '获取验证码'; btn.disabled = false; }
+        else btn.textContent = left + 's 后重发';
+      }, 1000);
+    } else {
+      btn.disabled = false; btn.textContent = '获取验证码';
+      $('xy-captcha-tip').hidden = !(r.needCaptcha || r.captchaInvalid);
+      st.textContent = '⚠ ' + (r.message || '发送失败');
+    }
+  } catch (e) {
+    btn.disabled = false; btn.textContent = '获取验证码';
+    st.textContent = '⚠ ' + e.message;
+  }
+});
+
+$('xy-sms-login').addEventListener('click', async () => {
+  const btn = $('xy-sms-login'), st = xyStatus();
+  const body = Object.assign(xyCreds(), { verifyCode: $('xy-code').value.trim() });
+  if (!body.mobilePhoneNumber || !body.verifyCode) { st.textContent = '⚠ 请填手机号和验证码'; return; }
+  btn.disabled = true; st.textContent = '正在验证并保存凭据……';
+  try {
+    const r = await xyPost('/api/xy/login/sms', body);
+    if (r.ok) {
+      st.textContent = '✓ 登录成功，凭据已存到本机，可以搜索和听播客了';
+      $('xy-code').value = '';
+      $('xy-captcha-tip').hidden = true;
+      refreshLoginStatus();
+    } else {
+      st.textContent = '⚠ ' + (r.message || '登录失败');
+      if (r.needManualToken) document.querySelector('.xy-manual').open = true;
+    }
+  } catch (e) { st.textContent = '⚠ ' + e.message; }
+  finally { btn.disabled = false; }
+});
+
 $('xy-token-save').addEventListener('click', async () => {
-  const st = $('xy-token-status');
+  const st = xyStatus();
   const t = $('xy-token-input').value.trim();
   if (!t) { st.textContent = '⚠ 请先粘贴 token'; return; }
   st.textContent = '验证中……';
   try {
-    const r = await api('/api/xy/login/token', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: t }) });
-    if (r.ok) { st.textContent = '✓ 登录成功，可以搜索和听播客了'; }
-    else st.textContent = '⚠ ' + (r.error || 'token 无效');
+    const r = await xyPost('/api/xy/login/token', { token: t });
+    if (r.ok) { st.textContent = '✓ 凭据已保存，可以搜索和听播客了'; $('xy-token-input').value = ''; refreshLoginStatus(); }
+    else st.textContent = '⚠ ' + (r.error || r.message || 'token 无效');
   } catch (e) { st.textContent = '⚠ ' + e.message; }
 });
-$('xy-token-clear').addEventListener('click', () => api('/api/xy/logout').then(() => { $('xy-token-status').textContent = '已退出'; }));
+$('xy-token-clear').addEventListener('click', () => api('/api/xy/logout').then(() => { xyStatus().textContent = '已退出'; refreshLoginStatus(); }));
 function pollQr() {
   clearInterval(state.qrTimer);
   state.qrTimer = setInterval(async () => {
@@ -824,7 +1259,12 @@ function pollQr() {
   }, 2500);
 }
 $('login-btn').addEventListener('click', openLogin);
-$('login-close').addEventListener('click', () => { $('login-modal').hidden = true; clearInterval(state.qrTimer); state.qrKey = null; });
+$('login-close').addEventListener('click', () => {
+  $('login-modal').hidden = true;
+  clearInterval(state.qrTimer); state.qrKey = null;
+  stopQishuiQrPoll();
+  if (typeof stopQQQrPoll === 'function') stopQQQrPoll();
+});
 
 /* ---------- 倍速 ---------- */
 const RATES = [1, 1.25, 1.5, 2, 0.75];
@@ -903,17 +1343,127 @@ function renderCollects() {
   });
 }
 
+/* ---------- 时钟与日期 ---------- */
+const WEEK = ['日', '一', '二', '三', '四', '五', '六'];
+function tickClock() {
+  const n = new Date();
+  $('home-date').textContent = `${n.getFullYear()} 年 ${n.getMonth() + 1} 月 ${n.getDate()} 日 · 星期${WEEK[n.getDay()]}`;
+  $('home-clock').textContent = `${String(n.getHours()).padStart(2, '0')}:${String(n.getMinutes()).padStart(2, '0')}`;
+  $('stat-date').textContent = `${n.getMonth() + 1}月${n.getDate()}日`;
+}
+setInterval(tickClock, 1000); tickClock();
+
+/* ---------- 今日聆听统计 ---------- */
+function getStats() {
+  const today = new Date().toISOString().slice(0, 10);
+  try {
+    const s = JSON.parse(localStorage.getItem('ew_stats') || 'null');
+    if (s && s.date === today) return s;
+  } catch { /* ignore */ }
+  return { date: today, sec: 0, cnt: 0, last: '' };
+}
+function saveStats(s) { try { localStorage.setItem('ew_stats', JSON.stringify(s)); } catch { /* ignore */ } }
+let _statTick = 0;
+function bumpStats(song) {
+  const s = getStats();
+  s.cnt += 1; s.last = song.name || '';
+  saveStats(s); paintStats(s);
+}
+function tickStats() {
+  if (!state.playing) return;
+  const now = Date.now();
+  if (_statTick && now - _statTick < 5000) return;   // 5 秒一计，防拖动进度虚增
+  const delta = _statTick ? Math.min(5, (now - _statTick) / 1000) : 0;
+  _statTick = now;
+  if (!delta) return;
+  const s = getStats();
+  s.sec += delta;
+  saveStats(s);
+  if (Math.floor(s.sec) % 15 < 5) paintStats(s);
+}
+setInterval(() => { _statTick = 0; }, 10000);   // 暂停后重新计时
+function paintStats(s) {
+  $('stat-min').textContent = Math.round(s.sec / 60);
+  $('stat-cnt').textContent = s.cnt;
+  $('stat-last').textContent = s.last || '等待记录';
+}
+paintStats(getStats());
+
+/* ---------- 音量 ---------- */
+audio.volume = Math.min(1, Math.max(0, Number(localStorage.getItem('ew_vol') ?? 1)));
+$('bar-vol').value = Math.round(audio.volume * 100);
+$('bar-vol').addEventListener('input', (e) => {
+  audio.volume = e.target.value / 100;
+  localStorage.setItem('ew_vol', audio.volume);
+});
+
 /* ---------- 键盘快捷键 ---------- */
 document.addEventListener('keydown', (e) => {
-  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
+    if (e.key === 'Escape') { e.target.blur(); closeSearchDrop(); }
+    return;
+  }
+  if (e.key === 'Escape') { closeSearchDrop(); closeQueue(); closeStage(); return; }
   if (e.code === 'Space') { e.preventDefault(); toggle(); }
   else if (e.code === 'ArrowRight' && e.shiftKey) playIndex(state.index + 1);
   else if (e.code === 'ArrowLeft' && e.shiftKey) playIndex(state.index - 1);
   else if (e.code === 'ArrowRight') audio.currentTime = Math.min(audio.duration || 0, audio.currentTime + 5);
   else if (e.code === 'ArrowLeft') audio.currentTime = Math.max(0, audio.currentTime - 5);
-  else if (e.code === 'ArrowUp') audio.volume = Math.min(1, audio.volume + .1);
-  else if (e.code === 'ArrowDown') audio.volume = Math.max(0, audio.volume - .1);
+  else if (e.code === 'ArrowUp') { audio.volume = Math.min(1, audio.volume + .1); $('bar-vol').value = Math.round(audio.volume * 100); localStorage.setItem('ew_vol', audio.volume); }
+  else if (e.code === 'ArrowDown') { audio.volume = Math.max(0, audio.volume - .1); $('bar-vol').value = Math.round(audio.volume * 100); localStorage.setItem('ew_vol', audio.volume); }
 });
+
+/* ---------- v3 视觉打磨：首页取色 / 指针墨光 / 舞台视差 / 滚动层次 ---------- */
+const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/* 首页取色比舞台更克制：六成琥珀打底，只让封面渗一点点墨色出来 */
+function tintHomeCover(src) {
+  if (!src) return;
+  const img = new Image();
+  img.onload = () => {
+    try {
+      const c = document.createElement('canvas'); c.width = c.height = 16;
+      const cx = c.getContext('2d', { willReadFrequently: true });
+      cx.drawImage(img, 0, 0, 16, 16);
+      const d = cx.getImageData(0, 0, 16, 16).data;
+      let r = 0, g = 0, b = 0, n = 0;
+      for (let i = 0; i < d.length; i += 4) {
+        const lum = d[i] * .299 + d[i + 1] * .587 + d[i + 2] * .114;
+        if (d[i + 3] < 40 || lum < 18 || lum > 240) continue;
+        r += d[i]; g += d[i + 1]; b += d[i + 2]; n++;
+      }
+      if (!n) return;
+      const base = [230, 176, 106];
+      const rgb = [r / n, g / n, b / n].map((v, i) => Math.round(v * .4 + base[i] * .6));
+      document.documentElement.style.setProperty('--home-ink', rgb.join(','));
+    } catch { /* 图不可读时保持琥珀 */ }
+  };
+  img.src = src;
+}
+
+/* 卡片：指针位置驱动径向墨光 */
+document.addEventListener('pointermove', (e) => {
+  const card = e.target && e.target.closest && e.target.closest('.b-card');
+  if (!card) return;
+  const r = card.getBoundingClientRect();
+  if (!r.width || !r.height) return;
+  card.style.setProperty('--mx', (((e.clientX - r.left) / r.width) * 100).toFixed(1) + '%');
+  card.style.setProperty('--my', (((e.clientY - r.top) / r.height) * 100).toFixed(1) + '%');
+}, { passive: true });
+
+/* 舞台：墨晕随指针轻微反向漂移，形成景深 */
+if (!reduceMotion) {
+  inkStage.addEventListener('pointermove', (e) => {
+    const nx = e.clientX / innerWidth - .5, ny = e.clientY / innerHeight - .5;
+    inkCanvas.style.transform = `translate3d(${(nx * -22).toFixed(1)}px, ${(ny * -22).toFixed(1)}px, 0)`;
+  }, { passive: true });
+  inkStage.addEventListener('pointerleave', () => { inkCanvas.style.transform = ''; });
+}
+
+/* 页面滚动后给顶栏一道墨线 */
+document.querySelectorAll('.page').forEach(p => p.addEventListener('scroll', () => {
+  document.body.classList.toggle('is-scrolled', p.scrollTop > 12);
+}, { passive: true }));
 
 /* ---------- 启动 ---------- */
 renderHist();
