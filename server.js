@@ -13,6 +13,9 @@ const {
   login_qr_check,
   login_status,
   user_account,
+  user_level,
+  user_subcount,
+  vip_info_v2,
   user_playlist,
   playlist_track_all,
   playlist_detail,
@@ -41,6 +44,7 @@ const electronRuntime = require('./modules/electron-runtime');
 const QISHUI_QR_AVAILABLE = electronRuntime.isChromiumShim ? !!electronRuntime.findChrome() : true;
 const tasteProfile = require('./modules/taste-profile.js');
 const recommender = require('./modules/recommend.js');
+const { createUnified } = require('./modules/unified.js');
 const { TrackDecryptor } = require('./modules/qishui-audio-decryptor/track-decryptor');
 const qishuiAudioDecryptor = new TrackDecryptor();
 
@@ -82,6 +86,7 @@ try { userCookie = fs.readFileSync(COOKIE_FILE, 'utf8').trim(); } catch { /* 首
 function saveCookie(c) {
   userCookie = String(c || '').trim();
   try { fs.writeFileSync(COOKIE_FILE, userCookie); } catch (e) { console.error('[Cookie] 写入失败', e.message); }
+  if (typeof clearAccountCache === 'function') clearAccountCache();
 }
 
 /* ---------- 工具 ---------- */
@@ -125,29 +130,100 @@ function mapPlaylist(p) {
     tag: (p.tags && p.tags[0]) || '',
   };
 }
-function normalizeLoginInfo(profile, account, extra) {
-  const vipType = Number((profile || {}).vipType || (extra || {}).vipType || 0);
-  const labelMap = { 11: 'SVIP', 1: 'VIP' };
+/* ---------- 网易云账号信息（含真实会员态） ----------
+   profile.vipType 的位含义在不同版本并不统一（当前账号实测返回 110），
+   因此会员态一律以 /vip/info/v2 的套餐 + 到期时间为准，vipType 只作兜底。 */
+function vipPackOf(pack, now) {
+  if (!pack) return null;
+  const level = Number(pack.vipLevel || 0);
+  const expire = Number(pack.expireTime || 0);
+  if (level <= 0) return null;
+  if (expire && expire <= now) return null; // 已过期
+  return { level, expireTime: expire };
+}
+function ymd(ts) {
+  if (!ts) return '';
+  const d = new Date(ts);
+  const p = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+function normalizeLoginInfo(profile, account) {
   return {
     loggedIn: !!(profile && profile.nickname),
     nickname: (profile && profile.nickname) || '',
     avatar: (profile && profile.avatarUrl) || '',
-    vipType,
-    vipLabel: labelMap[vipType] || '无VIP',
     userId: (account && account.id) || (profile && profile.userId) || 0,
+    vipType: Number((profile && profile.vipType) || 0),
+    vipLevel: 0,
+    isVip: false,
+    vipLabel: profile && profile.nickname ? '普通听众' : '未登录',
+    vipExpire: 0,
+    vipExpireText: '',
+    level: 0,
+    playlistCount: 0,
+    subPlaylistCount: 0,
   };
 }
-async function getLoginInfo() {
+let neAccountCache = { at: 0, data: null };
+function clearAccountCache() { neAccountCache = { at: 0, data: null }; }
+async function getNeteaseAccount(force) {
+  const now = Date.now();
+  if (!force && neAccountCache.data && now - neAccountCache.at < 60 * 1000) return neAccountCache.data;
+  let info = normalizeLoginInfo({}, {});
   try {
-    const r = await login_status({ cookie: userCookie, timestamp: Date.now() });
+    const r = await login_status({ cookie: userCookie, timestamp: now });
     const b = r.body || {};
-    const profile = b.profile || b.data && b.data.profile || {};
-    const account = b.account || b.data && b.data.account || {};
-    return normalizeLoginInfo(profile, account, b);
+    const profile = b.profile || (b.data && b.data.profile) || {};
+    const account = b.account || (b.data && b.data.account) || {};
+    info = normalizeLoginInfo(profile, account);
+    if (!info.loggedIn) { info.vipLabel = '未登录'; }
+    else {
+      const tasks = [];
+      // 会员态：黑胶（associator / redVipLevel）+ 音乐包（musicPackage）
+      tasks.push((async () => {
+        const v = await vip_info_v2({ cookie: userCookie, timestamp: now });
+        const d = (v.body && v.body.data) || {};
+        const redLevel = Number(d.redVipLevel || 0);
+        const black = vipPackOf(d.associator, now) || (redLevel > 0 ? { level: redLevel, expireTime: 0 } : null);
+        const music = vipPackOf(d.musicPackage, now);
+        const top = black || music;
+        if (!top) { info.isVip = false; info.vipLabel = '普通听众'; return; }
+        info.isVip = true;
+        info.vipLevel = top.level;
+        info.vipExpire = top.expireTime || 0;
+        info.vipExpireText = top.expireTime ? ymd(top.expireTime) : '';
+        const names = [];
+        if (black) names.push(redLevel > 1 ? '黑胶SVIP' : '黑胶VIP');
+        if (music) names.push('音乐包');
+        info.vipLabel = names.join(' + ');
+      })().catch(() => {
+        info.isVip = info.vipType > 0;
+        info.vipLabel = info.isVip ? '会员' : '普通听众';
+      }));
+      // 账号等级 + 歌单数（失败不影响主流程，账号信息本身就带够了）
+      tasks.push(user_level({ cookie: userCookie, timestamp: now })
+        .then(x => { info.level = Number((x.body && x.body.data && x.body.data.level) || 0); })
+        .catch(() => {}));
+      tasks.push(user_subcount({ cookie: userCookie, timestamp: now })
+        .then(x => {
+          // 该接口把计数直接放在 body 根上（没有 data 包裹）
+          const b = x.body || {};
+          const d = b.data || b;
+          info.playlistCount = Number(d.createdPlaylistCount || 0);
+          info.subPlaylistCount = Number(d.subPlaylistCount || 0);
+        })
+        .catch(() => {}));
+      await Promise.all(tasks);
+    }
   } catch {
-    return { loggedIn: false, nickname: '', avatar: '', vipType: 0, vipLabel: '无VIP', userId: 0 };
+    info = normalizeLoginInfo({}, {});
+    info.vipLabel = '未登录';
   }
+  neAccountCache = { at: now, data: info };
+  return info;
 }
+// 兼容旧调用点
+const getLoginInfo = getNeteaseAccount;
 
 /* ---------- 封面代理 ---------- */
 function proxyCover(res, coverUrl) {
@@ -249,6 +325,29 @@ async function tasteSearch(keyword, limit) {
   const r = await cloudsearch({ keywords: keyword, limit, offset: 0, cookie: userCookie });
   return ((r.body.result && r.body.result.songs) || []).map(mapSongRecord);
 }
+/* ---------- 统一音源层：一次连接，四平台音源与信息同屏 ---------- */
+const unified = createUnified({
+  getNeteaseCookie: () => userCookie,
+  getNeteaseAccount: (force) => getNeteaseAccount(force),
+  getQishuiCookie: () => qishuiCookie,
+  getQQCookie: () => qqApi.getQQCookie(),
+  getLoginOptions: () => ({
+    netease: { qr: true, methods: ['网易云音乐 App 扫码'] },
+    qq: {
+      qr: true,
+      methods: (qqQrLogin.getChannels() || []).filter(c => c.available !== false).map(c => c.label),
+      note: '三条通道：手机 QQ / 微信 / QQ 音乐 App',
+    },
+    qishui: {
+      qr: QISHUI_QR_AVAILABLE,
+      methods: QISHUI_QR_AVAILABLE ? ['抖音 App 扫码'] : ['手动粘贴 cookie'],
+      runtime: electronRuntime.isChromiumShim ? '本机 Chrome' : 'Electron',
+      note: QISHUI_QR_AVAILABLE ? '' : '本机没有 Chrome / Electron，扫码通道不可用，请用手动凭据',
+    },
+    xy: { qr: false, methods: ['手机号 + 短信验证码'], note: '官网 Web 接口换取 token 并保存在本机' },
+  }),
+});
+
 const tasteCache = new Map(); // syncKey -> { updatedAt, ts, data }
 async function tasteRecommendations(p, variant = 0) {
   const ck = p.key + ':' + variant;
@@ -345,12 +444,26 @@ const server = http.createServer(async (req, res) => {
       return sendJSON(res, { img: d.qrimg, url: d.qrurl });
     }
     if (pn === '/api/login/qr/check') {
-      const r = await login_qr_check({ key: q.get('key'), noCookie: true, timestamp: Date.now() });
-      const b = r.body || {};
-      const code = Number(b.code || 0);
-      const cookie = typeof r.cookie === 'string' ? r.cookie : (Array.isArray(r.cookie) ? r.cookie.join('; ') : '');
-      if (code === 803 && cookie) saveCookie(cookie);
-      return sendJSON(res, { code, message: b.message || '', nickname: (b.profile && b.profile.nickname) || '' });
+      const key = q.get('key') || '';
+      if (!key) return sendJSON(res, { code: 800, message: '二维码已失效，请刷新二维码' });
+      let r, b = {}, code = 801, cookie = '';
+      try {
+        r = await login_qr_check({ key, timestamp: Date.now() });
+        b = r.body || {};
+        code = Number(b.code || 0);
+        // 依赖库的 r.cookie 在某些响应里为 undefined，body.cookie 是同一份凭据的字符串形式
+        if (typeof r.cookie === 'string') cookie = r.cookie;
+        else if (Array.isArray(r.cookie)) cookie = r.cookie.join('; ');
+        if (!cookie && b.cookie) cookie = String(b.cookie);
+      } catch (e) {
+        // 轮询期间网络抖动不该打断扫码，也不该把 500 抛给前端
+        return sendJSON(res, { code: 801, message: '状态查询重试中…', transient: e.message });
+      }
+      if (code === 803) {
+        if (cookie) saveCookie(cookie);
+        return sendJSON(res, { code, message: b.message || '登录成功', nickname: (b.profile && b.profile.nickname) || '', saved: !!cookie });
+      }
+      return sendJSON(res, { code, message: b.message || '', nickname: '' });
     }
 
     // ---------- 登录态 ----------
@@ -671,6 +784,24 @@ const server = http.createServer(async (req, res) => {
         return sendJSON(res, tasteProfile.bindSyncKey(key, target));
       }
       return sendJSON(res, { ok: false, error: '未知的画像接口：' + action }, 404);
+    }
+
+    // ==================== 统一音源（Web / macOS / iOS 共用契约） ====================
+    // 所有平台并行检索，单个平台超时/未登录不会阻塞其它平台。
+    if (pn === '/api/unified/status') return sendJSON(res, await unified.status());
+    if (pn === '/api/unified/search') {
+      const kw = q.get('keywords') || '';
+      const limit = Math.max(4, Math.min(18, parseInt(q.get('limit') || '12', 10) || 12));
+      const page = Math.max(0, Math.min(10, parseInt(q.get('page') || '0', 10) || 0));
+      return sendJSON(res, await unified.search(kw, limit, page));
+    }
+    if (pn === '/api/unified/home') return sendJSON(res, await unified.home());
+    if (pn === '/api/unified/library') return sendJSON(res, await unified.library());
+    if (pn === '/api/unified/playlist') {
+      return sendJSON(res, await unified.playlist(String(q.get('provider') || 'netease'), q.get('id') || ''));
+    }
+    if (pn === '/api/unified/alternatives') {
+      return sendJSON(res, await unified.alternatives(q.get('name') || '', q.get('artist') || '', q.get('exclude') || ''));
     }
 
     // ---------- 静态资源 ----------

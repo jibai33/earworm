@@ -163,6 +163,9 @@
   </div>
 
   <div class="topbar-right">
+    <button id="account-btn" class="source-btn" aria-label="音源连接" title="查看 / 连接各平台音源">
+      <span class="acc-glyph">源</span><span class="acc-count" id="account-count">0/4</span>
+    </button>
     <button id="nav-mine" class="orb-btn" aria-label="曲库">曲</button>
     <div class="topbar-user" id="topbar-user" hidden>
       <img id="user-avatar" alt="">
@@ -175,11 +178,14 @@
 <!-- ══ 搜索下拉面板（桌面浮层 / 移动全屏页） ══ -->
 <div id="page-search" class="search-drop" hidden>
   <div class="src-tabs" id="src-tabs">
-    <button class="src-tab cur" data-src="netease">云村</button>
+    <button class="src-tab cur all-src" data-src="all">全部音源</button>
+    <button class="src-tab" data-src="netease">云村</button>
     <button class="src-tab" data-src="qishui">汽水</button>
     <button class="src-tab" data-src="qq">QQ</button>
     <button class="src-tab" data-src="xy">小宇宙</button>
   </div>
+  <!-- 全域检索时逐平台回报：谁有结果、谁待连接、谁出错 -->
+  <div id="search-source-summary" class="search-source-summary" hidden></div>
   <!-- ══ 个性化推荐：空查询态展示，来自 Web / Mac / iOS 共用的听感画像 ══ -->
   <section id="taste-rec" class="taste-rec" hidden>
     <div class="tr-head">
@@ -289,6 +295,15 @@
       <div class="b-kicker">DISCOVER · 拾遗</div>
       <div class="pl-grid" id="pl-grid"></div>
     </section>
+
+    <!-- 一屏尽听：四平台音源与信息同屏，登录后无需再切平台 -->
+    <section class="b-card bc-unified" id="unified-section" hidden>
+      <div class="b-kicker">ALL SOURCES · 一屏尽听
+        <button id="unified-refresh" class="chip-btn ghost">重新汇聚</button>
+      </div>
+      <div id="unified-bar" class="unified-bar"></div>
+      <div id="unified-home" class="unified-home"></div>
+    </section>
   </main>
 </div>
 
@@ -310,8 +325,17 @@
     <h2 class="sec-title">收藏 <span class="sec-en">COLLECTED</span></h2>
     <div id="collect-list" class="results"></div>
   </section>
-  <h2 class="sec-title">曲库 <span class="sec-en">MY PLAYLISTS</span></h2>
-  <div id="my-playlists" class="pl-list"></div>
+  <!-- 多方曲库：网易云歌单 + 汽水歌单 + 小宇宙订阅，按平台分组 -->
+  <section id="unified-library-wrap" class="unified-library-wrap">
+    <h2 class="sec-title">多方曲库 <span class="sec-en">ALL LIBRARIES</span>
+      <button id="lib-refresh" class="text-btn">刷新</button>
+    </h2>
+    <div id="unified-library"></div>
+  </section>
+  <div id="legacy-library" hidden>
+    <h2 class="sec-title">曲库 <span class="sec-en">MY PLAYLISTS</span></h2>
+    <div id="my-playlists" class="pl-list"></div>
+  </div>
 </div>
 
 <!-- ══ 歌单详情页 ══ -->
@@ -426,18 +450,43 @@
   <div class="login-card">
     <span class="seal seal-sm">闻曲</span>
     <div class="login-tabs" id="login-tabs">
-      <button class="login-tab cur" data-lp="netease">云村</button>
+      <button class="login-tab cur" data-lp="all">音源总览</button>
+      <button class="login-tab" data-lp="netease">云村</button>
       <button class="login-tab" data-lp="qishui">汽水</button>
       <button class="login-tab" data-lp="qq">QQ</button>
       <button class="login-tab" data-lp="xy">小宇宙</button>
     </div>
 
-    <!-- 网易云：扫码 -->
-    <div id="lp-netease">
-      <h2>扫码登录 · 网易云</h2>
-      <p class="login-tip">用网易云音乐 App 扫一扫</p>
-      <div class="qr-wrap"><img id="qr-img" alt="登录二维码"></div>
-      <div id="qr-status" class="qr-status">正在生成二维码…</div>
+    <!-- 总览：一次看清四平台连接状态，逐个授权后全站自动汇聚 -->
+    <div id="lp-all">
+      <h2>一次连接 · 四平台同听</h2>
+      <p class="login-tip">每个平台账号只需授权一次；之后曲库、推荐、搜索会自动汇聚到同一屏，不用再来回切换。</p>
+      <div id="account-overview" class="account-overview"></div>
+      <div id="account-overview-note" class="qr-status">正在检测各平台连接状态…</div>
+      <div class="qr-actions">
+        <button id="account-connect-next" class="brush-btn solid">连接下一个音源</button>
+        <button id="account-refresh" class="brush-btn">重新检测</button>
+      </div>
+    </div>
+
+    <!-- 网易云：已连接显示账号与真实会员态，未连接才扫码 -->
+    <div id="lp-netease" hidden>
+      <h2>网易云 · 我的账号</h2>
+      <div id="ne-acct" class="ne-acct" hidden>
+        <img id="ne-avatar" class="ne-avatar" alt="">
+        <div class="ne-info">
+          <b id="ne-name"></b>
+          <span id="ne-vip" class="ne-vip"></span>
+          <small id="ne-meta"></small>
+        </div>
+        <button id="ne-logout" class="brush-btn danger">退出</button>
+      </div>
+      <div id="ne-qr-box">
+        <p class="login-tip">用网易云音乐 App 扫一扫</p>
+        <div class="qr-wrap"><img id="qr-img" alt="登录二维码"></div>
+        <div class="qr-actions"><button id="qr-refresh" class="brush-btn">刷新二维码</button></div>
+        <div id="qr-status" class="qr-status">正在生成二维码…</div>
+      </div>
     </div>
 
     <!-- 汽水：抖音 App 扫码 -->

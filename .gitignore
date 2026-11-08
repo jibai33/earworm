@@ -10,3 +10,6 @@ data/
 .workbuddy/
 dist/
 .DS_Store
+
+# macOS 桌面版独立仓库（https://github.com/jibai33/earworm_mac）
+version_mac/
