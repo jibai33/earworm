@@ -29,11 +29,24 @@ npm start          # http://localhost:3210/app/
 
 手机访问：连同一 Wi-Fi，浏览器打开 `http://<电脑IP>:3210/app/`。
 
+## 在线版（GitHub Pages）
+
+在线地址：https://jibai33.github.io/earworm/
+
+- `main` 是源码与 `server.js` 后端；`gh-pages` 分支只放 `web/` 的静态快照，Pages 从该分支根目录发布。
+- 改完 `web/` 后执行 `npm run pages`：脚本用临时 worktree 同步文件、提交并推送 `gh-pages`，不切换主工作区分支，无变化时不产生空提交。构建通常 1–2 分钟内生效。
+- **静态前端不是完整应用**：它没有后端。在 `github.io` 域名下，`web/app.js` 默认把 API 指向文件头的 `CLOUD_API` 常量并带上 `CLOUD_SHARECODE`。个性化推荐、QQ 三通道扫码、汽水抖音扫码、小宇宙短信登录都依赖 `server.js` 的新接口；后端不同步部署时，前端会明确提示「连不上画像服务」，不会静默降级。
+- 切换后端：页面顶部红色横幅点「修改」，填入服务地址即可（`web/app.js` 的 `setApiBase()`，写入 `ew_api` 后重载）；删除该 localStorage 键即恢复默认 `CLOUD_API`。
+- 汽水抖音扫码依赖本机 Chrome + `puppeteer-core` 模拟 Electron 窗口，云端无 Chrome 时该通道不可用，需保留 cookie 兜底。
+
 ## 项目结构
 
 ```
-server.js      独立轻量服务端（网易云接口 + 静态资源）
+server.js      独立轻量服务端（平台接口 + 静态资源 + 画像/推荐 API）
+modules/       各平台接口与登录、画像、推荐模块
 web/           PWA 前端（原生 HTML/CSS/JS，无框架）
+scripts/       部署脚本（pages-deploy.sh）
+data/          画像持久化（运行时生成，已忽略）
 .cookie        登录 cookie（本机生成，勿提交）
 ```
 
