@@ -636,13 +636,9 @@ body::before {
 .q-item:hover { background: rgba(255,255,255,.05); }
 .q-item.cur { color: var(--amber); }
 
-/* ═══ 提示条 ═══ */
-.api-tip {
-  position: fixed; top: 0; left: 0; right: 0; z-index: 90;
-  background: rgba(192,57,43,.92); color: #f5e9d5; font-size: 12px;
-  padding: 8px 14px; text-align: center;
-}
-.api-tip code { background: rgba(255,255,255,.12); border-radius: 4px; padding: 1px 6px; }
+/* ═══ 音源面板底部：在线版的服务地址入口（只在 Pages 模式渲染） ═══ */
+.api-entry { display: block; margin: 10px auto 0; font-size: 11px; opacity: .6; }
+.api-entry:hover { opacity: 1; }
 
 /* ═══════════ 移动端 ═══════════ */
 @media (max-width: 899px) {
