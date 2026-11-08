@@ -180,6 +180,85 @@
 #gr-yi { color: var(--celadon); border-color: rgba(143,184,174,.35); }
 #gr-ji { color: #d99a92; border-color: rgba(192,57,43,.38); }
 
+/* ── 卦解：经文原文 + 变占断辞 ── */
+.gua-comm {
+  margin-top: 20px; padding-top: 18px; border-top: 1px solid var(--line-2);
+  opacity: 0; transform: translateY(8px);
+  transition: opacity .5s ease .12s, transform .5s ease .12s;
+}
+.gua-comm.shown { opacity: 1; transform: none; }
+.gua-modal.casting .gua-comm { display: none; }
+.gc-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
+.gc-head h3 {
+  font-family: var(--serif); font-size: 15px; letter-spacing: .22em;
+  color: var(--amber-2); font-weight: 400;
+}
+.gc-head h3::after {
+  content: ''; display: inline-block; width: 34px; height: 1px; margin: 0 0 4px 12px;
+  background: linear-gradient(90deg, rgba(var(--amber-rgb), .7), transparent);
+}
+.gc-src { font-size: 10px; letter-spacing: .08em; color: var(--txt-dim); white-space: nowrap; }
+.gc-sum {
+  font-family: var(--serif); font-size: 13px; line-height: 1.95; letter-spacing: .03em;
+  color: rgba(233,228,216,.78); margin-bottom: 16px;
+}
+/* 卦辞短、象辞长，非等宽列可避免象曰末尾孤字成行 */
+.gc-cols { display: grid; grid-template-columns: minmax(0, .82fr) minmax(0, 1.18fr); gap: 14px; }
+.gc-block {
+  padding: 12px 14px; border-radius: var(--r-sm);
+  background: rgba(255,255,255,.025); border: 1px solid var(--line-2);
+  border-left: 2px solid rgba(var(--amber-rgb), .5);
+}
+.gc-k { display: block; font-size: 10px; letter-spacing: .2em; color: var(--amber); margin-bottom: 8px; }
+.gc-text {
+  font-family: var(--serif); font-size: 14px; line-height: 1.95; letter-spacing: .04em;
+  color: var(--txt); margin: 0;
+}
+.gc-fold { margin-top: 12px; border-bottom: 1px solid var(--line-2); }
+.gc-fold > summary {
+  list-style: none; cursor: pointer; padding: 9px 2px;
+  font-size: 11px; letter-spacing: .14em; color: var(--txt-dim);
+  transition: color .2s;
+}
+.gc-fold > summary::-webkit-details-marker { display: none; }
+.gc-fold > summary::before { content: '▸'; display: inline-block; margin-right: 8px; color: var(--amber); transition: transform .2s; }
+.gc-fold[open] > summary::before { transform: rotate(90deg); }
+.gc-fold > summary:hover { color: var(--amber-2); }
+.gc-fold > .gc-text { padding: 2px 2px 12px; font-size: 13px; opacity: .84; }
+
+/* 断辞所依：朱砂引文卡 */
+.gc-verdict {
+  margin-top: 16px; padding: 14px 16px 12px; border-radius: var(--r-sm);
+  background: linear-gradient(135deg, rgba(192,57,43,.1), rgba(192,57,43,.025));
+  border: 1px solid rgba(192,57,43,.28);
+}
+.gv-head { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px 12px; margin-bottom: 12px; }
+.gv-k {
+  font-family: var(--serif); font-size: 12px; letter-spacing: .16em; color: #e8a49e;
+  padding: 3px 9px; border: 1px solid rgba(192,57,43,.45); border-radius: 3px;
+}
+.gv-rule { font-size: 11px; line-height: 1.6; color: rgba(233,228,216,.72); }
+.gv-items { display: flex; flex-direction: column; gap: 9px; }
+.gv-item { padding-left: 11px; border-left: 1px solid rgba(192,57,43,.24); }
+.gv-item.main { border-left: 2px solid var(--cinnabar); }
+.gv-label { display: block; font-size: 10px; letter-spacing: .1em; color: var(--txt-dim); margin-bottom: 4px; }
+.gv-item.main .gv-label { color: #e8a49e; }
+.gv-text {
+  font-family: var(--serif); font-size: 14px; line-height: 1.85; letter-spacing: .04em;
+  color: var(--txt); margin: 0;
+}
+.gv-item.main .gv-text { color: #f5e9d5; }
+.gv-note { font-size: 10px; line-height: 1.7; color: var(--txt-dim); opacity: .8; margin: 12px 0 0; }
+
+/* 六爻爻辞全文 */
+.gc-yaos { display: flex; flex-direction: column; gap: 7px; padding: 4px 2px 12px; }
+.gc-yao { display: flex; align-items: baseline; gap: 12px; font-size: 13px; line-height: 1.7; }
+.gcy-title { flex: none; width: 62px; font-family: var(--serif); font-size: 12px; color: var(--amber); }
+.gc-yao.moving .gcy-title { color: #e8a49e; }
+.gcy-text { font-family: var(--serif); letter-spacing: .03em; color: rgba(233,228,216,.82); }
+.gc-yao.moving .gcy-text { color: var(--txt); }
+.gc-footnote { font-size: 10px; line-height: 1.8; color: var(--txt-dim); opacity: .72; margin: 14px 0 0; }
+
 /* ── 面板底部 ── */
 .gua-foot { margin-top: 20px; display: flex; flex-direction: column; align-items: center; gap: 12px; }
 .gf-note { font-size: 10px; color: var(--txt-dim); opacity: .7; letter-spacing: .08em; text-align: center; }
@@ -195,16 +274,29 @@
   .y-bars { width: min(46vw, 128px); }
   .gua-result { gap: 12px; }
   .gr-seal { width: 50px; height: 50px; font-size: 16px; }
+  .gc-head { flex-direction: column; align-items: flex-start; gap: 4px; }
+  .gc-cols { grid-template-columns: 1fr; gap: 10px; }
+  .gc-text, .gv-text { font-size: 13px; }
+  .gcy-title { width: 56px; }
+  .gv-head { gap: 6px; }
+  /* 滚到底时给声明文字留出安全区，不被 sticky 的淡出遮罩扫到 */
+  .gc-footnote { padding-bottom: 26px; }
   /* 窄屏内容要滚动，操作区固定在底部，避免「只看得到卦、找不到按钮」 */
   .gua-foot {
-    position: sticky; bottom: 0; z-index: 2; margin-top: 12px; padding: 12px 0 4px;
-    background: linear-gradient(to top, #12151a 0, #12151a 84%, rgba(18,21,26,0) 100%);
+    position: sticky; bottom: 0; z-index: 2; margin-top: 12px; padding: 14px 0 4px;
+    background: #12151a;
+  }
+  /* 顶部单独做一条淡出遮罩，避免渐变半透明区压住上方脚注文字 */
+  .gua-foot::before {
+    content: ''; position: absolute; left: 0; right: 0; top: -22px; height: 22px;
+    background: linear-gradient(to top, #12151a, rgba(18,21,26,0));
+    pointer-events: none;
   }
 }
 
 /* ── 减少动态偏好：只留结果，不转不翻不逐爻 ── */
 @media (prefers-reduced-motion: reduce) {
-  .gua-sticker, .gua-card, .gua-modal, .yao, .gua-result, .ring-gua { transition: none !important; }
+  .gua-sticker, .gua-card, .gua-modal, .yao, .gua-result, .gua-comm, .ring-gua { transition: none !important; }
   .gs-taiji, .taiji, .coin.flip { animation: none !important; }
   .yao { opacity: 1; transform: none; }
   .gua-result { opacity: 1; transform: none; }
