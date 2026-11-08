@@ -60,15 +60,19 @@ async function api(path, opts) {
   return r.json();
 }
 
-/* ---------- API 地址设置（Pages 模式） ---------- */
+/* ---------- API 地址设置（Pages 模式） ----------
+   不在页面顶部挂常驻提示条（会打断首屏视觉），收进「音源总览」面板底部一个小入口 */
 if (IS_PAGES) {
   document.addEventListener('DOMContentLoaded', () => {
-    const tip = document.createElement('div');
-    tip.className = 'api-tip';
-    tip.innerHTML = API_BASE
-      ? `在线版 · 服务：<code>${escapeHtml(API_BASE)}</code> <button class="text-btn" onclick="setApiBase()">修改</button>`
-      : `在线版需要指定服务地址 <button class="brush-btn" onclick="setApiBase()">设置</button>`;
-    document.body.prepend(tip);
+    const card = document.querySelector('#login-modal .login-card');
+    if (!card) return;
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'text-btn api-entry';
+    b.textContent = '服务地址';
+    b.title = API_BASE ? `当前服务：${API_BASE}` : '尚未指定服务地址，点此填写';
+    b.addEventListener('click', (e) => { e.preventDefault(); setApiBase(); });
+    card.appendChild(b);
   });
 }
 function setApiBase() {
