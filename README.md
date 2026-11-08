@@ -18,10 +18,16 @@ earworm/
 | --- | --- | --- |
 | 形态 | 浏览器页面 / 可添加到主屏幕的 PWA | 原生窗口的 macOS App（dmg / zip） |
 | 运行方式 | `npm start` → `http://localhost:3210/app/` | `npm start` 起 Electron，内嵌本地服务 |
-| 后端 | `server.js` 单文件 HTTP 服务 | `app/server.js`，与 web 端同源 |
+| 服务端 | 本目录下的 `server.js` | 自带一份 `app/server.js` |
 | 仓库 | 本仓库（`jibai33/earworm`） | 独立仓库 `jibai33/earworm_mac`，在本目录内被 .gitignore 排除 |
 
-两端共用同一套「统一音源层」接口（`/api/unified/*`）与同一份听感画像契约：同一服务地址 + 同一同步码 = 同一份画像，所以 Web 与 Mac 的收听习惯可以互通。
+## 两端独立
+
+两端是**各自独立的代码库**，不互相引用、不共享依赖与构建产物：
+
+- `version_mac/` 里的 `app/` 属于 mac 仓库自己的代码，为适配只读 App 包、写入 `~/Library/Application Support` 做过独立改造；
+- 改 web 端（`version_web/`）不会要求 mac 端跟着改，反之亦然；**不要**用复制或 rsync 把两端代码互相覆盖；
+- 需要复用某个具体实现时，手动挑那一段改过去，不做整体同步。
 
 ## 快速开始
 
